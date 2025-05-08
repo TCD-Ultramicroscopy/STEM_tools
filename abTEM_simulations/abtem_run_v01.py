@@ -26,7 +26,7 @@ folder_sim = '/home/vasily/test_abTEM/'
 
 #Specific output path - please, make sure that path exists!
 extr='output_test/'
-
+sample_name = 'Sample'
 #Path to cif files
 folder = '/home/vasily/test_abTEM/'
 #folder = 'C://Users//lebedevv//Desktop//cifs//'
@@ -34,8 +34,8 @@ folder = '/home/vasily/test_abTEM/'
 folder_sim += extr
 
 #Here we are deciding if cpu or gpu computing happens
-#abtem.config.set({"device": "gpu", "fft": "fftw",'dask.lazy': True})
-abtem.config.set({"device": "cpu", "fft": "fftw",'dask.lazy': True})
+abtem.config.set({"device": "gpu", "fft": "fftw",'dask.lazy': True})
+#abtem.config.set({"device": "cpu", "fft": "fftw",'dask.lazy': True})
 
 #No of threads; limited by video-memory, can fail if No is too high
 num_workers = 2
@@ -48,10 +48,11 @@ num_workers = 2
 
 #Number of frozen phonons
 frozen_phonons = 3
-#frozen_phonons = 16
+#frozen_phonons = 10
 
-#Max number to search for in hkl/uvw lists #Legacy
-#max_uvw = 20
+#Max int to search for uvw
+#needed for hkl to uvw conversion
+max_uvw = 20
 
 ##############
 #Lamella-related
@@ -69,8 +70,10 @@ borders = 5 #A
 #borders = 10 #A
 
 #Thickness of the virtual lamella
-thickness = 5 #A
+thickness = 10 #A
 #thickness = 30 #A
+
+extra_shift_z = 0#-10 #A
 
 #override XY sampling
 #override_sampling = .5
@@ -80,7 +83,7 @@ override_sampling = False
 tol = .3 #tolerance
 
 #Tilt
-global_tilt = (0,0)#now - to tilt lamella, not the beam; (around x, deg; around y, deg)
+global_tilt = (0,0)#now - to tilt the lamella, not the beam; (around x, deg; around y, deg)
 
 scan_start = (borders,borders)
 scan_stop = (borders+scan_s,borders+scan_s)
@@ -89,9 +92,10 @@ lamella_sizes = (borders*2+scan_s,borders*2+scan_s,thickness)
 #Please, check in case of issues; might fail if atom is not found
 ##############
 #Which atom we would like to shift to (0,0,0) after rotation
-atom_to_zero = 'O'
+#atom_to_zero = 'Ti'
+#atom_to_zero = 'O'
 #atom_to_zero = 'Zr'
-#atom_to_zero = 'Pb'
+atom_to_zero = 'Pb'
 ##############
 
 
@@ -178,7 +182,8 @@ def prepare_job(hkl_set,is_uvw=True,inplane_angle=None):
 			print('Generating',i,j)
 			#scell = struct_set[i]
 			cif_path = folder + cif_files[i]
-			surf = make_lamella(cif_path,j,sblock_size,lamella_sizes,atom_to_zero,tol,is_uvw,inplane_angle)
+			surf = make_lamella(cif_path,j,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw,
+						is_uvw=is_uvw,inplane_angle=inplane_angle,extra_shift_z=extra_shift_z)
 			potential = add_potential(surf)
 			#potential.compute()
 			fph_potential = add_frozen_phonons_potential(surf)
@@ -242,7 +247,7 @@ def plot_dataset(data,is_uvw):
 		)
 		#probe.build()
 		probe.show(figsize=(4, 4), title="Real Space Probe", ax=ax2)
-		fig.suptitle('PZO, '+sg+', '+str_hkl,fontsize=18)
+		fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
 		fig.tight_layout()
 		fig.savefig(folder_sim+sg+'_'+line_hkl+'_potential.png',dpi=600)
 		plt.close()
@@ -254,7 +259,7 @@ def plot_dataset(data,is_uvw):
 		)
 
 		fph_probe.show(figsize=(4, 4), title="Real Space Probe", ax=ax2)
-		fig.suptitle('PZO, '+sg+', '+str_hkl,fontsize=18)
+		fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
 		fig.tight_layout()
 		fig.savefig(folder_sim+sg+'_'+line_hkl+'_fph_potential.png',dpi=600)
 		plt.close()
@@ -265,7 +270,7 @@ def plot_dataset(data,is_uvw):
 		abtem.show_atoms(surf, ax=ax2, title="Cross-section", plane='xz')
 		abtem.show_atoms(surf, ax=ax3, title="Cross-section", plane='yz')
 
-		fig.suptitle('PZO, '+sg+', '+str_hkl,fontsize=18)
+		fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
 		fig.savefig(folder_sim+sg+'_'+line_hkl+'_combined.png',dpi=600)
 		plt.close()
 
@@ -288,7 +293,7 @@ def full_run(s,is_uvw=True,inplane_angle=None):
 		f = open(folder_sim+dataset[i]['symm']+'_'+str(global_tilt)+'_'+''.join([str(q) for q in dataset[i]['hkl']])+'presets.txt','w')
 		f.write('sblock_size\t'+str(sblock_size)+'\n')
 		f.write('tolerance\t'+str(tol)+'\n')
-		#f.write('max_uvw\t'+str(max_uvw)+'\n')
+		f.write('max_uvw\t'+str(max_uvw)+'\n')
 		f.write('borders\t'+str(borders)+'\n')
 		f.write('scan_s\t'+str(scan_s)+'\n')
 		f.write('thickness\t'+str(thickness)+'\n')
@@ -358,5 +363,8 @@ def full_run(s,is_uvw=True,inplane_angle=None):
 
 #################RUN######################
 
-dry_run({'Pbam': [[2,-1,0],[2,1,0],[0,0,2]]},is_uvw=True,inplane_angle=0.00)
-full_run({'Pbam': [[2,-1,0],[2,1,0],[0,0,2]]},is_uvw=True,inplane_angle=0.00)
+#dry_run({'Pbam': [[2,-1,0],[2,1,0],[0,0,2]]},is_uvw=True,inplane_angle=0.00)
+#full_run({'Pbam': [[2,-1,0],[2,1,0],[0,0,2]]},is_uvw=True,inplane_angle=0.00)
+
+dry_run({'Pbam': [[0,0,2]]},is_uvw=True,inplane_angle=0.00)
+full_run({'Pbam': [[0,0,2]]},is_uvw=True,inplane_angle=0.00)

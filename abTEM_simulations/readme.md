@@ -10,13 +10,15 @@ The main benefit of this code is the possibility to deal with non-orthogonal spa
 Trigonal symmentry has not been assessed yet; looking forward to hear any feedback on that! 
 
 Known issues and TODO:
+ - move most variables to JSON
+ - output file names to reflect was it uvw or hkl
  - first frame is simulated separately from frozen phonons, and this simulation is just repeated later on.
 	maybe add a flag?
  - dry\_run should be implemented as a flag in a full_run
  - separated lib file to be created
  - gaussian blur is not handling borders correctly
  - BF images to be confirmed
- - in-plane rotation to add 'this hkl up' functionality
+ - for the in-plane rotation to add 'this hkl up' functionality
  - check imported libraries
 
 Acknowledgements:

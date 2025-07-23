@@ -100,6 +100,54 @@ def export_data(folder,sf,fname,lat_params_vec,raw_lat_params,raw_motif,metadata
 	motif = pd.DataFrame.from_dict(motif_fin,orient='index')
 	motif.to_csv(export_name + '_motif.csv',sep='\t')
 
+
+def vector_map_calc(phi,df):
+	#phi = param[2]/180*np.pi
+	#fin_lat = get_coords_from_ij(f_ij,param,no_modulation,only_ortho,max_lim)[0]
+	
+	obs = np.array(df[['x_obs','y_obs']].values)
+	calc = np.array(df[['x_theor_new','y_theor_new']].values)
+	
+	vdiff_xy = obs - calc
+	df['vdiff_xy'] = vdiff_xy.tolist()
+	 
+	vdiff_ref = np.nanmean(vdiff_xy,axis=0)
+	
+	vproj = np.array([(x*np.cos(phi) + y*np.sin(phi), y*np.cos(phi) - x*np.sin(phi)) for x,y in vdiff_xy])
+	df['vproj'] = vproj.tolist()
+	
+	#print(np.std(vproj,axis=0))
+	#print(np.std(vdiff_xy,axis=0))
+	#print('ref',vdiff_ref)
+	#print('Std rot',np.sqrt(np.sum(np.std(vproj,axis=0)**2)),'len',len(vproj))
+	#print('Std raw',np.sqrt(np.sum(np.std(vdiff_xy,axis=0)**2)),'len',len(vdiff_xy))
+	
+	#std_to_report = np.std(vproj,axis=0)
+	
+	
+	vdist = np.sqrt(np.sum(vdiff_xy**2,axis=1))
+	df['vdist'] = vdist
+	
+	vdiff_xy_corr = vdiff_xy - vdiff_ref
+	df['vdiff_xy_corr'] = vdiff_xy_corr.tolist()
+	print('Test dist',sum(vdist)/len(vdist))
+	#print(np.mean(vdiff_xy_corr,axis=0))
+	
+	
+	
+	#print(np.std(abs(vdiff_xy_corr),axis=0))
+	ang = [np.arctan2(j,i) for i,j in vdiff_xy]
+	ang_corr = [np.arctan2(j,i) for i,j in vdiff_xy_corr] #np.angle(vdiff_xy, deg=True)
+	df['ang'] = ang
+	df['ang_corr'] = ang_corr
+	
+	std_to_report = np.std(abs(vdiff_xy),axis=0)
+	#vdist = np.sqrt(np.sum(vdiff_xy**2,axis=1))
+	#str_mean = plot_stats_rep(vdist,fname_save)
+	
+	return std_to_report,df
+
+'''
 def vector_map_calc(phi,obs,calc):
 	#phi = param[2]/180*np.pi
 	#fin_lat = get_coords_from_ij(f_ij,param,no_modulation,only_ortho,max_lim)[0]
@@ -131,3 +179,4 @@ def vector_map_calc(phi,obs,calc):
 	#str_mean = plot_stats_rep(vdist,fname_save)
 	
 	return std_to_report,vdist,vdiff_xy,vdiff_ref,vdiff_xy_corr,ang,ang_corr
+'''

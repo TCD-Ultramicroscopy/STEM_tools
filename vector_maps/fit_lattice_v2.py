@@ -88,3 +88,6 @@ print(motif)
 
 refinement_run(folder,save_folder_name,fname,calib,lat_params_prefit_tmp,motif_prefit_tmp,
 						show_initial_spots=False,vec_scale=0.1)
+						
+refinement_run(folder,save_folder_name,fname,calib,lat_params_prefit_tmp,motif_prefit_tmp,
+						do_fit=False,recall_zero=False,show_initial_spots=False,vec_scale=0.1)

@@ -18,6 +18,7 @@ Known issues and TODO:
  - support for [110]PC lattice to be implemented
  - support for simultaneous imaging (BF/DF) to be considered
  - starting lattice parameters can be estimated by FFT
+ - residuals of 2D gauss fit to be visualized
 
 Acknowledgements:
  - Lewys Jones for ideas and supervision

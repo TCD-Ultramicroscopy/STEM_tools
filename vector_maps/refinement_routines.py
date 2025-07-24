@@ -162,15 +162,6 @@ def filter_lat(ij,obs,param,max_d=0):
 		min_idxs,
 		np.nan
 		)
-	
-	#ij_inuse propagates the original ij value to each of the paired ones
-	ij_inuse = np.where(
-		min_dists[:,None] <= max_d,
-		ij_ref[min_idxs],
-		np.nan
-		)
-
-	#print(theor, ij_ref, ij_inuse)
 	'''
 	df = pd.DataFrame({
 		'x_obs': obs[:, 0],
@@ -185,7 +176,8 @@ def filter_lat(ij,obs,param,max_d=0):
 		})
 		
 	#return lookup_t,ij_inuse
-	df.loc[df['distance'] >= max_d] = np.nan
+	df.loc[df['distance'] >= max_d, 'distance'] = np.nan
+	df.loc[df['distance'] >= max_d, 'lookup_t'] = np.nan
 	
 	#legacy_output = np.array([df['x_theor'].values,df['y_theor'].values])
 	
@@ -211,31 +203,84 @@ def get_diff(par,raw_par,fit_flags,ij_cr,obs_cr,lookup_t,max_lim):
 
 	diff = cost_function(obs_cr,theor)
 	return diff
-		
 
 
-def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_initial_spots=False,vec_scale=0.05,do_fit=True):
+def calculate_rel_diff(df,labels_raw,relative_to,kernel=1):
+	labels_i = [i for i,_ in enumerate(labels_raw) ]
+	relative_to_i = labels_raw.index(relative_to)	
+	
+	q = ['vdiff_xy', 'vproj', 'vdiff_xy_corr']
+	q_ref = ['vdiff_xy_ref', 'vproj_ref', 'vdiff_xy_corr_ref']
+	q_rel = ['vdiff_xy_rel', 'vproj_rel', 'vdiff_xy_corr_rel']
+
+	for X,X_ref,X_rel in zip(q,q_ref,q_rel):
+		#df[X_ref] = df.set_index(['i', 'j']).index.map(X)
+		ref_q = df[df['motif'] == relative_to_i].set_index(['i', 'j'])[X]
+		if kernel == 1:
+			df[X_ref] = df.apply(lambda row: ref_q.get((row['i'], row['j']), np.nan), axis=1)
+		elif kernel == 4:
+			df[X_ref] = df.apply(lambda row: kernel4(ref_q, row['i'], row['j']), axis=1)
+		df[X_rel] = df.apply(lambda row: np.array(row[X]) - np.array(row[X_ref]) if not np.any(np.isnan(row[X_ref])) else np.nan, axis=1)
+
+	vdiff_xy_rel = np.array([i if not np.any(np.isnan(i)) else [np.nan,np.nan] for i in df['vdiff_xy_rel'].values])
+	df['ang_rel'] = [np.arctan2(j,i) for i,j in np.array(vdiff_xy_rel)]
+	vdiff_xy_corr_rel = [i if not np.any(np.isnan(i)) else [np.nan,np.nan] for i in df['vdiff_xy_rel'].values]
+	df['ang_corr_rel'] = [np.arctan2(j,i) for i,j in np.array(vdiff_xy_corr_rel)]
+
+	vdist_rel = np.sqrt(np.sum(vdiff_xy_rel**2,axis=1))
+	df['vdist_rel'] = vdist_rel
+	#print(df)
+
+	return df
+	
+def kernel4(ref_q,i,j):
+	l = [(i,j),(i+1,j),(i,j+1),(i+1,j+1)]
+	#print([ref_q.get(d, np.nan) for d in l])
+
+	s = [ref_q.get(d, [np.nan, np.nan]) for d in l]
+	s = np.array(s,dtype=object)
+	#print(s)
+	s = s.astype(float)
+
+	return np.sum(s, axis=0)/4.
+
+def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_initial_spots=False,vec_scale=0.05,do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None):
 	if not do_fit:
 		recall_zero=False
-
-	relative_to=None #placeholder. to be implemented later
-	
+		
 	s = load_frame(folder,fname,calib)
-	try:
-		x0,y0,ell0,rot0,i_0 = np.load(folder+fname.split('.')[0]+'.npy')
-	except:
-		print('Historical data with no ellipticity provided')
-		x0,y0 = np.load(folder+fname.split('.')[0]+'.npy')
+	
+	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
+	#print(dataset.shape)
+	if min(dataset.shape) == 2:
+		print('No ellipticity found!')
+		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0'])
+	else:
+		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I0'])
+		#x0,y0,ell0,rot0,i_0 = np.load(folder+fname.split('.')[0]+'.npy')
+		#except:
+		#print('Historical data with no ellipticity provided')
+		#x0,y0 = np.load(folder+fname.split('.')[0]+'.npy')
 		#temporary workaround for comparison with some historical data
 
-	observed_xy = np.array([ (i*calib,j*calib) for i,j in zip(x0,y0)])
-
+	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
+	df_raw[['x_obs', 'y_obs']] = observed_xy
 	ij = gen_ij((-100,100))
 
 	if recall_zero:
 		bring_ith_atom_to_0 = int(len(observed_xy)/2)
 		lat_params['base'] = [observed_xy[bring_ith_atom_to_0,0],observed_xy[bring_ith_atom_to_0,1],lat_params['base'][2]]
 	
+	#If extra shift is provided in fraq coordinates
+	#we can convert it to (x,y) with the standard functionality as a r-vector to the (shx,shy) for u.c. with ij [0,0]
+	if not extra_shift_ab is None:
+		print(np.array(list(lat_params['abg'])+list(lat_params['base'])+list(extra_shift_ab)))
+		tmp_val,_,_ = get_coords_from_ij(np.array([(0,0)]),np.array(list(lat_params['abg'])+list(lat_params['base'])+list(extra_shift_ab)),max_lim,crop=False)
+		tmp_val = tmp_val[0]
+		print(lat_params['base'])
+		lat_params['base'] = [lat_params['base'][0]+tmp_val[0],lat_params['base'][1]+tmp_val[1],lat_params['base'][2]]
+		print(lat_params['base'])
+		
 	#vectors to construct theor from ij
 	param_vec,fit_param_vec = vectorize_params(lat_params,motif)
 	
@@ -244,18 +289,30 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
 	
 	
-	lookup_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=0)
+	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=0)
+	l1 = len(df_raw['x_obs'].values)
+	l2 = len(tmp_df['x_obs'].values)
+	if l1 != l2:
+		print(l1,l2)
+		raise IOError
+	#print(df_raw,tmp_df)
+	lookup_df = pd.merge(df_raw, tmp_df, on=['x_obs', 'y_obs'], how='inner')
+	l3 = len(lookup_df['x_obs'].values)
+	if l1 != l3:
+		print(l1,l2,l3)
+		raise IOError
+	
 	lookup_t = lookup_df['lookup_t'].values
-	print(lookup_df)
-	lookup_df_cl = lookup_df.copy()
-	lookup_df_cl = lookup_df_cl.dropna()
+	#print(lookup_df)
+	#lookup_df_cl = lookup_df.copy()
+	#lookup_df_cl = lookup_df_cl.dropna()
 	
 	#print(ij_inuse)
 	
 	#th_relevant = np.array([ theor[int(i)] for i in lookup_t if not np.isnan(i)])
-	th_relevant = np.array(lookup_df_cl[['x_theor','y_theor']].values)
+	th_relevant = np.array(lookup_df[['x_theor','y_theor']].values)
 	#print(th_relevant)
-	obs_cr = np.array(lookup_df_cl[['x_obs','y_obs']].values)#observed_xy[~np.isnan(lookup_t)]
+	obs_cr = np.array(lookup_df[['x_obs','y_obs']].values)#observed_xy[~np.isnan(lookup_t)]
 
 
 	#ij_inuse_cleared = np.array(ij_inuse[~np.isnan(ij_inuse)]).reshape(-1,2).astype(int)
@@ -303,7 +360,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	theor_res_rel = [ theor_res[int(i)] if not np.isnan(i) else (np.nan,np.nan) for i in lookup_t ]
 	lookup_df[['x_theor_new','y_theor_new']] = np.array(theor_res_rel, dtype='float')
 	#theor_res_rel = theor_res_rel[~np.isnan(theor_res_rel)]
-	print(lookup_df)
+	#print(lookup_df)
 	
 	refined_lat = am.Sublattice(np.array(theor_res)/calib, image=s, color='r') #refined full
 	refined_rel_lat = am.Sublattice(np.array(theor_res_rel)/calib, image=s, color='r') #refined filtered to paired ones
@@ -320,28 +377,68 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		
 	metadata['std'] = std
 	
+
+
+	
+	labels_raw = [i for i in motif.keys() if motif[i]['use'] ]
+	types_raw = [ motif[i]['atom'] for i in labels_raw]
+
+
+	
+	if not relative_to is None:
+		if not relative_to in labels_raw:
+			raise IOError('Suggested reference atom position not found')
+		else:
+			if len(labels_raw) == 1:
+				raise IOError('Only one lattice found, can not compute a relative diff')
+			labels_i = [i for i,_ in enumerate(labels_raw) ]
+			relative_to_i = labels_raw.index(relative_to)
+			diff_df = calculate_rel_diff(diff_df,labels_raw,relative_to,kernel=kernel)
+	
+	diff_df = diff_df.dropna()			
+	
+	if relative_to is None:
+		vdiff_xy = np.array(diff_df['vdiff_xy'].tolist())
+		#print(vdiff_xy)
+		th_relevant2 = np.array(diff_df[['x_theor_new','y_theor_new']].values)
+		vdist = diff_df['vdist'].values
+		ang = diff_df['ang'].values
+		ang_corr = diff_df['ang_corr'].values
+		vdiff_xy_corr = np.array(diff_df['vdiff_xy_corr'].tolist())
+	else:
+		vdiff_xy = np.array(diff_df['vdiff_xy_rel'].tolist())
+		#print(vdiff_xy)
+		th_relevant2 = np.array(diff_df[['x_theor_new','y_theor_new']].values)
+		ang = diff_df['ang_rel'].values
+		vdist = diff_df['vdist_rel'].values
+		ang_corr = diff_df['ang_corr_rel'].values
+		vdiff_xy_corr = np.array(diff_df['vdiff_xy_corr_rel'].tolist())
+		
 	if not sf is None:
 		if do_fit:
 			export_data(folder,sf,fname,res.x,lat_params,motif,metadata)
 		else:
 			export_data(folder,sf,fname,param_vec,lat_params,motif,metadata)
-			
-			
-		diff_df = diff_df.dropna()
-		vdiff_xy = np.array(diff_df['vdiff_xy'].tolist())
-		#print(vdiff_xy)
-		th_relevant2 = np.array(diff_df[['x_theor_new','y_theor_new']].values)
-		
-		plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
-		plot_lattice(s,[obs_lat,refined_rel_lat],fname,folder,sf,'fit_'+sf)
+
+		if relative_to is None:	
+			plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
+			plot_lattice(s,[obs_lat,refined_rel_lat],fname,folder,sf,'fit_'+sf)
+	
+	
 		
 		file_s = folder + sf + '/' +fname +'_'+sf
-		plot_stats_rep(diff_df['vdist'].values,file_s+'_diff',ang=False,ang_weights=None)
-		plot_stats_rep(diff_df['ang'].values,file_s+'_angles',ang=True,ang_weights=None)
+		plot_stats_rep(vdist,file_s+'_diff',ang=False,ang_weights=None)
+		plot_stats_rep(ang,file_s+'_angles',ang=True,ang_weights=None)
+		
+		if 'ell0' in diff_df.columns and 'rot0' in diff_df.columns:
+			f_el = diff_df['ell0'].values
+			f_rot = diff_df['rot0'].values
+			f_el = [(i,j) for i,j in zip(f_el * np.cos(f_rot),-f_el * np.sin(f_rot))]
+			plot_quiver(file_s + '_ellipticity',th_relevant2,f_el,f_rot,1,units_v='rel.u.',ell=True)
 		
 		
-		plot_quiver(file_s + '_vmap_abs',th_relevant2,vdiff_xy,diff_df['ang'].values,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
-		plot_quiver(file_s + '_vmap_rotated',th_relevant2,diff_df['vdiff_xy_corr'].tolist(),diff_df['ang_corr'].values,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_abs',th_relevant2,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_rotated',th_relevant2,vdiff_xy_corr,ang_corr,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
 		
 		#_corr meant to be aligned with OX already, compensating phi
 		phi = phi*np.pi/180
@@ -354,8 +451,12 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		proj_a90 = np.dot(vdiff_xy,base_y)
 		proj_a90 = base_y*proj_a90[:,None]
 				
-		plot_quiver(file_s + '_vmap_proj_a',th_relevant2,proj_a,diff_df['ang'].values,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
-		plot_quiver(file_s + '_vmap_proj_a90',th_relevant2,proj_a90,diff_df['ang'].values,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_proj_a',th_relevant2,proj_a,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_proj_a90',th_relevant2,proj_a90,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		
+		if 'I0' in diff_df.columns:
+			at_labels = [i+'\n'+j for i,j in zip(labels_raw,types_raw)]
+			plot_violin(file_s + '_I0_vor',at_labels,diff_df)
 	
 	if do_fit:
 		return metadata, res.x

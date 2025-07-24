@@ -50,7 +50,7 @@ lat_params_prefit,motif_prefit = unpack_vector(lat_params_vec,lat_params,motif)
 
 save_folder_name = 'free_all'
 metadata,lat_params_vec = refinement_run(folder,save_folder_name,fname,calib,lat_params_prefit,motif_prefit,
-						show_initial_spots=True,vec_scale=0.1)
+						show_initial_spots=True,vec_scale=0.1,extra_shift_ab=(0.25,0.25))
 lat_params_prefit,motif_prefit = unpack_vector(lat_params_vec,lat_params,motif)
 
 save_folder_name = 'Zr_fixed'

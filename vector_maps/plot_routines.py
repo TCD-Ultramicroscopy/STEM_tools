@@ -30,6 +30,21 @@ def plot_lattice(img,sublattice_list,fname,fl,sf,text):
 	fig.savefig(fl+sf+'/'+fname+'_'+text+'.png')
 	
 	plt.close('all')
+
+
+def plot_violin(fname_save,labels,df):
+	plt.close()
+	all_I = []
+	#print(df)
+	pos = []
+	for i,j in enumerate(labels):
+		all_I.append(df.loc[df['motif']==i,'I0'])
+		pos.append(i)
+	plt.violinplot(all_I,positions=pos)
+	plt.xticks(ticks=pos, labels=labels)
+	plt.ylabel('Intensity')
+	plt.savefig(fname_save+'.png')
+	plt.close()
 	
 	
 def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False):

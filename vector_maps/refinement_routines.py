@@ -244,7 +244,8 @@ def kernel4(ref_q,i,j):
 
 	return np.sum(s, axis=0)/4.
 
-def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_initial_spots=False,vec_scale=0.05,do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None):
+def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_initial_spots=False,vec_scale=0.05,
+			do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None,sub_area=None,max_dist=0):
 	if not do_fit:
 		recall_zero=False
 		
@@ -265,6 +266,15 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 
 	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
 	df_raw[['x_obs', 'y_obs']] = observed_xy
+	
+	if not sub_area is None:
+		df_raw.loc[df_raw['x_obs'] < sub_area[0], 'x_obs'] = np.nan
+		df_raw.loc[df_raw['x_obs'] > sub_area[1], 'x_obs'] = np.nan
+		df_raw.loc[df_raw['y_obs'] < sub_area[2], 'y_obs'] = np.nan
+		df_raw.loc[df_raw['y_obs'] > sub_area[3], 'y_obs'] = np.nan
+		df_raw = df_raw.dropna()
+		observed_xy = np.array([ (i,j) for i,j in df_raw[['x_obs', 'y_obs']].values])
+	
 	ij = gen_ij((-100,100))
 
 	if recall_zero:
@@ -289,7 +299,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
 	
 	
-	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=0)
+	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=max_dist)
 	l1 = len(df_raw['x_obs'].values)
 	l2 = len(tmp_df['x_obs'].values)
 	if l1 != l2:

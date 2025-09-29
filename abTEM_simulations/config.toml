@@ -1,0 +1,97 @@
+[paths]
+#General output path
+folder_sim = '/home/vasily/test_abTEM/'
+#folder_sim = 'C://Users//lebedevv//Desktop//sym//'
+
+#Specific subfolder - please, make sure that path exists!
+extr='test_v3/'
+
+#Path to cif files
+folder = '/home/vasily/test_abTEM/'
+#folder = 'C://Users//lebedevv//Desktop//cifs//'
+
+#Sample name
+sample_name = 'PZO'
+
+[gpu_related]
+use_gpu = false
+dask_cuda = true
+cupy_fft_cache_size = '1024 MB'
+dask_chunk_size_gpu = '128 MB'
+dask_chunk_size = "512 MB"
+
+[simulations]
+#Number of frozen phonons
+frozen_phonons = 2
+#frozen_phonons = 15
+#frozen_phonons = 'None'
+
+#fph_sigma = False #any boolean converts to None, i.e. default
+fph_sigma = 0.25#0.25#0.1 #A;
+
+#override XY sampling (scan); default - Nyquist*0.9
+#override_sampling = .5
+override_sampling = false
+do_full_run = true
+
+[lamella_settings]
+#Max int to search for uvw
+#needed for hkl to uvw conversion
+max_uvw = 20
+
+#Size of a superblock
+
+#sblock_size = 1100 #A
+sblock_size = 100 #A
+
+#!!!! there is no guaranty that the frame will be 100% filled after the rotation and crop !!!
+#better to double-check, and to keep sblock size sufficiently large
+
+#Scan size
+scan_s = 10 #A
+#scan_s = 50 #A
+
+#Extra gaps, framing the sacn in XY directions
+#borders = 5 #A
+borders = 5 #A
+
+#Thickness of the virtual lamella
+thickness = 10 #A
+#thickness = 300 #A
+
+extra_shift_z = 0#-10 #A
+
+#Spatial tolerance - in use for lamella margins, and for atoms search near (0,0,0) point
+tol = 0.3 #tolerance
+
+#Please, check in case of issues; might fail if atom is not found
+##############
+#Which atom we would like to shift to (0,0,0) after rotation
+#atom_to_zero = 'Ti'
+atom_to_zero = 'Zr'
+#atom_to_zero = 'Pb'
+##############
+
+#Tilt - to tilt the lamella, not the beam
+global_tilt_a = 0 #around x, deg
+global_tilt_b = 0 #around y, deg
+
+#Only if we need vacances; experimental
+add_vacancies_toggle = false
+element_to_remove = 'Ti'
+probability_of_vac = 0.3
+
+[microscope]#Nion, TCD, 200kV
+HT_value = 200000 #V
+do_diffraction = true
+
+haadfinner = 99  # mrad
+haadfouter = 200  # mrad
+
+#30-63?
+abfinner = 15  # mrad
+abfouter = 33  # mrad
+
+#0-9.3?
+bfinner = 0.0001  # mrad
+bfouter = 9 # mrad

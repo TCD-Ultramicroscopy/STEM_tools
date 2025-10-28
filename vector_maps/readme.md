@@ -11,11 +11,11 @@ The algorithm of usage is the following:
 
 Known issues and TODO:
 
- - preview is needed
- - (done) code cleanup is required
+ - (done) preview is needed
+ - code cleanup is required
  - more comments needed
  - re-fit by 2D gaussian call from 'fit_lattice' is currently not working properly, to fix
- - image processing functions to be extracted to one lib, refinement-related to another
+ - (done) image processing functions to be extracted to one lib, refinement-related to another
  - (done) support for [110]PC lattice to be implemented
  - support for simultaneous imaging (BF/DF) to be considered
  - starting lattice parameters can be estimated by FFT
@@ -26,8 +26,9 @@ Known issues and TODO:
  - (done) sub-array for pre-fit
  		allowed by sub_area
  - check extra shift
- - move load_frame outside of the fit function
+ - (done) move load_frame outside of the fit function
  - double-check rotations for vmap
+ - double-check kernel4 function, which computes difference on the basis of 4 nearest neighbours
  
 Acknowledgements:
  - Lewys Jones for ideas and supervision

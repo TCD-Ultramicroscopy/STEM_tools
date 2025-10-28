@@ -11,10 +11,21 @@ import numpy as np
 import scipy.stats as st
 
 def plot_lattice(img,sublattice_list,fname,fl,sf,text):
+	'''
+	Purpose of this function is to create&save a figure which represents atomap sublattices
+	inputs:
+		img - image loaded as a hyperspy object ( see routines.load_frame )
+		sublattice_list - array of atomap lattices to be plotted
+		fl - str, general path to the workfolder
+		sf - str, specific subpath to local workfolder
+		fname - str, basename of file to be processed
+		text - str, extra text field to be added to the safed file name
+	'''
+
 	plt.close('all')
 	
 	atom_lattice = am.Atom_Lattice(
-			image=img,
+			image=img.transpose(signal_axes=[1, 0]),#TODO! is this .T needed?
 			sublattice_list=sublattice_list)
 	s = atom_lattice.get_sublattice_atom_list_on_image()
 	s.plot()
@@ -33,13 +44,22 @@ def plot_lattice(img,sublattice_list,fname,fl,sf,text):
 
 
 def plot_violin(fname_save,labels,df):
+	'''
+	Plot distributions of variables (intensities) specific for different atomic sites
+	inputs:
+		fname_save - str, full name of file to be saved, including path
+		labels - list, descriptors to be plot
+		df - pd dataframe to be used; expected to have a column 'motif'
+			with a descriptors numbers and a column of 'I' with variables to plot
+	'''
 	plt.close()
 	all_I = []
 	#print(df)
 	pos = []
 	for i,j in enumerate(labels):
-		all_I.append(df.loc[df['motif']==i,'I0'])
-		pos.append(i)
+		#all_I.append(df.loc[df['motif']==i,'I0'])
+		all_I.append(df.loc[df['motif']==i,'I_gauss'])
+		pos.append(i)#TODO check these numbers vs atomic sites N as in config
 	plt.violinplot(all_I,positions=pos)
 	plt.xticks(ticks=pos, labels=labels)
 	plt.ylabel('Intensity')
@@ -212,8 +232,8 @@ def plot_stats_rep(vdist,fname_save,ang=False,ang_weights=None):
 	plt.savefig(fname_save+'_hist.png')
 	
 	ax.set_xlim(e_min,e_max)
-	ax.set_xscale('log')
-	plt.savefig(fname_save+'_hist_log.png')
+	#ax.set_xscale('log')
+	#plt.savefig(fname_save+'_hist_log.png')
 	
 	plt.close('all')
 	

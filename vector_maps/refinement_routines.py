@@ -12,11 +12,15 @@ import atomap.initial_position_finding as ipf
 import scipy
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
+import cv2
 
 from routines import *
 from plot_routines import *
 
-max_lim=(100,100)
+
+from matplotlib.widgets import Slider, Button
+
+max_lim=(1000,1000)
 
 def gen_ij(ij_range):
 	
@@ -101,38 +105,7 @@ def get_coords_from_ij(ij,param_vec,max_lim,crop=False):
 		ij_ref_cr = ij_ref
 		
 	return cr_lat,cr_ij,ij_ref
-
-'''
-def old_filter_lat(obs,theor,param,max_d=0):
-	if max_d == 0:
-		max_d = np.sqrt((param[0]/4)**2+(param[1]/4)**2)
-		
-	#lookup table shows for each exp atom the corresponding theor one (both by indexes)
-	lookup_t = []
 	
-	i = 0
-	while i < len(obs):
-		at = obs[i]
-		#for at in obs:
-		dist = np.array(theor)-np.array(at)
-		dist = np.sqrt(dist**2)
-		dist = np.sum(dist,axis=1)
-		
-		if min(dist)<=max_d:
-			t = theor[dist<=min(dist)+.000001]
-			if len(t)>1:
-				print('Err! len>1', t)
-			lookup_t.append( np.where( np.isclose(dist, min(dist)) )[0][0] )
-		else:
-			lookup_t.append(np.nan)
-		i += 1
-		
-	#lookup_t = np.array(lookup_t,dtype='int')
-	
-	#at the moment, all observed are returned, even if the nearest one is far away... tbf
-	#print('Sanity check,lens shall be equal',len(f_obs),len(f_theor))
-	return lookup_t
-'''	
 def filter_lat(ij,obs,param,max_d=0):
 	#TODO param[i] is not reliable; has to be replaced by a,b ref
 	if max_d == 0:
@@ -230,40 +203,49 @@ def calculate_rel_diff(df,labels_raw,relative_to,kernel=1):
 	vdist_rel = np.sqrt(np.sum(vdiff_xy_rel**2,axis=1))
 	df['vdist_rel'] = vdist_rel
 	#print(df)
-
+	
+	#We also need to mask the reference
+	df.loc[df['motif'] == relative_to_i, 'x_obs'] = np.nan
+	
 	return df
 	
-def kernel4(ref_q,i,j):
+def kernel4(df,i,j):##TODO##TODO###TODO###
 	l = [(i,j),(i+1,j),(i,j+1),(i+1,j+1)]
 	#print([ref_q.get(d, np.nan) for d in l])
-
-	s = [ref_q.get(d, [np.nan, np.nan]) for d in l]
-	s = np.array(s,dtype=object)
+	#print(df)
+	#s = [ref_q.get(d, [None, None]).values for d in l]
+	#look = pd.MultiIndex.from_tuples(l, names=['i', 'j'])
+	#picked = df.reindex(look)
+	#print(df.columns)
+	#s = [np.array(x) for x in df.reindex(l).to_numpy()]
+	try:
+		s = np.array([np.array(df.loc[d]) if d in df.index else np.array([np.nan, np.nan]) for d in l ])
+	except:
+		s = np.array([np.nan,np.nan])
+	#s = np.stack([np.asarray(df[d].values if d in df.index else [None, None]) for d in l])
 	#print(s)
-	s = s.astype(float)
+	#s = np.array(s,dtype=float)
+	#print(s)
+	#s = picked['val'].to_numpy()
+	#print(s)
+	try:
+		return np.sum(s, axis=0)/4.
+	except:
+		return np.array([np.nan,np.nan]) #sometimes there is a 'list' appearing here ##BUG### 
 
-	return np.sum(s, axis=0)/4.
-
-def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_initial_spots=False,vec_scale=0.05,
-			do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None,sub_area=None,max_dist=0):
-	if not do_fit:
-		recall_zero=False
-		
-	s = load_frame(folder,fname,calib)
-	
-	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
+def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_shift_ab=None,max_dist=0,sub_area=None):
+	#TODO proper pandas
 	#print(dataset.shape)
 	if min(dataset.shape) == 2:
 		print('No ellipticity found!')
 		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0'])
-	else:
+	elif min(dataset.shape) == 5:
+		print('It seems that gaussian Is are not exported')
 		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I0'])
 		#x0,y0,ell0,rot0,i_0 = np.load(folder+fname.split('.')[0]+'.npy')
-		#except:
-		#print('Historical data with no ellipticity provided')
-		#x0,y0 = np.load(folder+fname.split('.')[0]+'.npy')
-		#temporary workaround for comparison with some historical data
-
+	else:
+		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I_gauss','I0'])
+		
 	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
 	df_raw[['x_obs', 'y_obs']] = observed_xy
 	
@@ -274,8 +256,9 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		df_raw.loc[df_raw['y_obs'] > sub_area[3], 'y_obs'] = np.nan
 		df_raw = df_raw.dropna()
 		observed_xy = np.array([ (i,j) for i,j in df_raw[['x_obs', 'y_obs']].values])
-	
-	ij = gen_ij((-100,100))
+		
+		
+	ij = gen_ij((-170,170))
 
 	if recall_zero:
 		bring_ith_atom_to_0 = int(len(observed_xy)/2)
@@ -293,7 +276,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		
 	#vectors to construct theor from ij
 	param_vec,fit_param_vec = vectorize_params(lat_params,motif)
-	
+	print(param_vec)
 	#get roughly relevant ij - and theor - from the size estimation
 	theor,ij_cr,_ = get_coords_from_ij(ij,param_vec,max_lim,crop=True)
 	theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
@@ -312,7 +295,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		print(l1,l2,l3)
 		raise IOError
 	
-	lookup_t = lookup_df['lookup_t'].values
+	#lookup_t = lookup_df['lookup_t'].values
 	#print(lookup_df)
 	#lookup_df_cl = lookup_df.copy()
 	#lookup_df_cl = lookup_df_cl.dropna()
@@ -328,30 +311,131 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	#ij_inuse_cleared = np.array(ij_inuse[~np.isnan(ij_inuse)]).reshape(-1,2).astype(int)
 	#print(ij_inuse,ij_inuse_cleared)
 	
+	return ij_cr, th_relevant, observed_xy, obs_cr, lookup_df
+
+
+
+def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show_initial_spots=False,vec_scale=0.05,
+			do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None,sub_area=None,max_dist=0):
+	if not do_fit:
+		recall_zero=False
+	
+		
+	s = load_frame(folder,fname,calib).T#!TODO is .T needed?
+	
+	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
+
+	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
+	
+
+
+	if show_initial_spots:
+		
+		m_zeros = {'0':{'coord':(0.,0.),
+				'use':True,
+				'fit':[False,False]}}
+		param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)
+		zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,crop=False)
+		
+		_im = cv2.imread(folder+fname+'.tif', cv2.IMREAD_UNCHANGED)
+		H, W = _im.shape[:2]
+		
+		fig, ax = plt.subplots(figsize=(6, 4))
+		fig.subplots_adjust(bottom=0.27) 
+		
+		ax.set_aspect('equal')
+		ax.scatter(observed_xy[:,0],observed_xy[:,1], marker='o',s=50, edgecolors="blue", facecolors="none", linewidths=2)
+		sc0 = ax.scatter(zeros[:,0],zeros[:,1], marker='o',s=50, edgecolors="k", facecolors="none", linewidths=3)
+		
+		
+		
+		
+		sc = ax.scatter(th_relevant[:,0],th_relevant[:,1], marker='o',s=50, color='r')
+		
+		ax.imshow(_im.T,extent=[0, W*calib, 0, H*calib],origin='upper')#,origin='lower')
+		
+		ax_shx = fig.add_axes([0.05, 0.12, 0.4, 0.03])
+		ax_shy = fig.add_axes([0.05, 0.07, 0.4, 0.03])
+		ax_ph = fig.add_axes([0.05, 0.02, 0.4, 0.03])
+		
+		ax_a = fig.add_axes([0.55, 0.12, 0.45, 0.03])
+		ax_b = fig.add_axes([0.55, 0.07, 0.45, 0.03])
+		ax_g = fig.add_axes([0.55, 0.02, 0.45, 0.03])
+		
+
+		s_a = Slider(ax_a, 'a', valmin=lat_params['abg'][0]*.5, valmax=lat_params['abg'][0]*1.5, valinit=lat_params['abg'][0], valstep=0.001)
+		s_b = Slider(ax_b, 'b', valmin=lat_params['abg'][1]*.75, valmax=lat_params['abg'][1]*1.25, valinit=lat_params['abg'][1], valstep=0.001)
+		s_g = Slider(ax_g, 'g', valmin=lat_params['abg'][2]*.75, valmax=lat_params['abg'][2]*1.25, valinit=lat_params['abg'][2], valstep=0.1)
+		s_r = Slider(ax_ph, 'phi', valmin=min(lat_params['base'][2]*.5,-5), valmax=max(lat_params['base'][2]*1.5,5), valinit=lat_params['base'][2], valstep=0.01)
+		
+		avg_par = lat_params['abg'][0]/2 + lat_params['abg'][1]/2
+		s_shx = Slider(ax_shx, 'shx', valmin=-avg_par/2, valmax=avg_par/2, valinit=lat_params['base'][0], valstep=0.001)
+		s_shy = Slider(ax_shy, 'shy', valmin=-avg_par/2, valmax=avg_par/2, valinit=lat_params['base'][1], valstep=0.001)
+		
+		
+		def update(_=None):
+			lat_params['abg'][0] = s_a.val
+			lat_params['abg'][1] = s_b.val
+			lat_params['abg'][2] = s_g.val
+			lat_params['base'][2] = s_r.val
+			lat_params['base'][0] = s_shx.val
+			lat_params['base'][1] = s_shy.val
+			
+			ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+				extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
+			sc.set_offsets(np.c_[th_relevant])     # update the scatter in-place
+			
+			#update set of zeros
+			param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)
+			zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,crop=False)
+			sc0.set_offsets(np.c_[zeros])
+			fig.canvas.draw_idle()
+			
+		s_a.on_changed(update)
+		s_b.on_changed(update)
+		s_g.on_changed(update)
+		s_r.on_changed(update)
+		s_shx.on_changed(update)
+		s_shy.on_changed(update)
+		
+		ax_reset = fig.add_axes([0.87, 0.25, 0.08, 0.08])
+		btn = Button(ax_reset, 'Reset')
+		btn.on_clicked(lambda evt: (s_a.reset(), s_b.reset(), s_r.reset(), s_shx.reset(), s_shy.reset(), s_g.reset()))
+		
+		plt.show()
+		print('Params',lat_params)
+
+
+	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
+
+	lookup_t = lookup_df['lookup_t'].values
+
+	
 	metadata = {}
 	metadata['refined'] = do_fit
 	metadata['relative'] = relative_to
 	metadata['atoms_used'] = len(obs_cr)
 
+
+
+	#metadata['std'] = std
+
+
+	param_vec,fit_param_vec = vectorize_params(lat_params,motif) 
 	if do_fit:
 		res = scipy.optimize.minimize(get_diff,param_vec, args=(param_vec,fit_param_vec,ij_cr,obs_cr,lookup_t,max_lim))
 		#print(res)
 		print('Residual',res.fun)
 				
-		metadata['residual_x1000'] = np.sqrt(res.fun)*1000
+		metadata['residual_in_pm'] = np.sqrt(res.fun)*1000
 		param_vec = res.x
 		#metadata['param'] = res.x
 		#metadata['a/b'] = res.x[0]/res.x[1]
 		#err = get_errors(res)
 
 	metadata['param'] = param_vec
-
-	#metadata['std'] = std
-
-	if show_initial_spots:
-		plt.scatter(observed_xy[:,0],observed_xy[:,1])
-		plt.scatter(th_relevant[:,0],th_relevant[:,1])
-		plt.show()
 	
 	
 	# (i,j) hashed with its index in the cleared lookup
@@ -361,8 +445,9 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	#	plt.scatter(ij_inuse_cleared[:,0],ij_inuse_cleared[:,1])
 	#	plt.show()
 	#atomap sublattices
-	obs_lat = am.Sublattice(observed_xy/calib, image=s, color='b')
-	theor_lat = am.Sublattice(theor/calib, image=s, color='r') #before refinement, full
+	#obs_lat = am.Sublattice(observed_xy/calib, image=s.T, color='b')
+	obs_lat = am.Sublattice(obs_cr/calib, image=s, color='b')
+	#theor_lat = am.Sublattice(theor/calib, image=s, color='r') #before refinement, full
 	theor_rel_lat = am.Sublattice(th_relevant/calib, image=s, color='r') #before refinement, filtered to paired ones
 	
 
@@ -372,7 +457,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	#theor_res_rel = theor_res_rel[~np.isnan(theor_res_rel)]
 	#print(lookup_df)
 	
-	refined_lat = am.Sublattice(np.array(theor_res)/calib, image=s, color='r') #refined full
+	#refined_lat = am.Sublattice(np.array(theor_res)/calib, image=s, color='r') #refined full
 	refined_rel_lat = am.Sublattice(np.array(theor_res_rel)/calib, image=s, color='r') #refined filtered to paired ones
 
 
@@ -394,15 +479,15 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 	types_raw = [ motif[i]['atom'] for i in labels_raw]
 
 
-	
+	diff_df = diff_df.dropna()
 	if not relative_to is None:
 		if not relative_to in labels_raw:
 			raise IOError('Suggested reference atom position not found')
 		else:
 			if len(labels_raw) == 1:
 				raise IOError('Only one lattice found, can not compute a relative diff')
-			labels_i = [i for i,_ in enumerate(labels_raw) ]
-			relative_to_i = labels_raw.index(relative_to)
+			#labels_i = [i for i,_ in enumerate(labels_raw) ]
+			#relative_to_i = labels_raw.index(relative_to)
 			diff_df = calculate_rel_diff(diff_df,labels_raw,relative_to,kernel=kernel)
 	
 	diff_df = diff_df.dropna()			
@@ -431,9 +516,8 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 			export_data(folder,sf,fname,param_vec,lat_params,motif,metadata)
 
 		if relative_to is None:	
-			plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
+			#plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
 			plot_lattice(s,[obs_lat,refined_rel_lat],fname,folder,sf,'fit_'+sf)
-	
 	
 		
 		file_s = folder + sf + '/' +fname +'_'+sf
@@ -464,11 +548,16 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=True,show_
 		plot_quiver(file_s + '_vmap_proj_a',th_relevant2,proj_a,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
 		plot_quiver(file_s + '_vmap_proj_a90',th_relevant2,proj_a90,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
 		
-		if 'I0' in diff_df.columns:
+		if 'I0' in diff_df.columns and relative_to is None:
 			at_labels = [i+'\n'+j for i,j in zip(labels_raw,types_raw)]
 			plot_violin(file_s + '_I0_vor',at_labels,diff_df)
+
+		plot_output_page(fname,folder + sf + '/')
+		plot_output_page_diff(fname,folder + sf + '/')
 	
 	if do_fit:
 		return metadata, res.x
+	else:
+		return metadata, param_vec
 	
 	

@@ -12,6 +12,7 @@ import atomap.initial_position_finding as ipf
 import scipy
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
 import cv2
 
 from routines import *
@@ -105,6 +106,45 @@ def get_coords_from_ij(ij,param_vec,max_lim,crop=False):
 		ij_ref_cr = ij_ref
 		
 	return cr_lat,cr_ij,ij_ref
+
+'''
+def remove_close_points(points, threshold=1e-4):
+	points = np.asarray(points, dtype=float)
+	N = len(points)
+	if N == 0:
+		print('Empty array of points!')
+		raise IOError
+
+	# Pairwise distance matrix
+	D = cdist(points, points, metric='euclidean')
+
+	# We'll keep the first occurrence and drop later near-duplicates
+	keep = np.ones(N, dtype=bool)
+
+	for i in range(N):
+		if not keep[i]:
+			continue
+		# mark all later points within threshold as duplicates
+		close_mask = (D[i, i+1:] < threshold)
+		keep[i+1:][close_mask] = False
+
+	return points[keep]
+'''
+
+def remove_close_points(points, threshold=1e-4):
+	points = np.asarray(points, dtype=float)
+	tree = cKDTree(points)
+	pairs = tree.query_pairs(threshold)   # all pairs within threshold
+
+	# Collect indices to remove (keep the first occurrence)
+	to_remove = set()
+	for i, j in pairs:
+		# always remove the later index (arbitrary rule)
+		to_remove.add(j)
+
+	mask = np.ones(len(points), dtype=bool)
+	mask[list(to_remove)] = False
+	return points[mask]
 	
 def filter_lat(ij,obs,param,max_d=0):
 	#TODO param[i] is not reliable; has to be replaced by a,b ref
@@ -123,19 +163,22 @@ def filter_lat(ij,obs,param,max_d=0):
 	dist_matrix = cdist(obs, theor)
 	min_dists = np.min(dist_matrix, axis=1)
 	min_idxs = np.argmin(dist_matrix, axis=1)
-	
+
 	matched_theor = theor[min_idxs]
 	matched_ij = ij_ref[min_idxs]
 	matched_motif = motif[min_idxs]
 	
-	'''
-	#lookup table shows for each exp atom the corresponding theor one (both by indexes)
-	lookup_t = np.where(
-		min_dists[:] <= max_d,
-		min_idxs,
-		np.nan
-		)
-	'''
+	#Test, just to make sure if there is no problem
+	if len(min_idxs) != len(np.unique(min_idxs)):
+		print('Repeated matches!',len(min_idxs) - len(np.unique(min_idxs)))
+		#min_idxs = np.unique(min_idxs)
+		#raise IOError
+		unique_js, counts = np.unique(min_idxs, return_counts=True)
+		colliding_js = unique_js[counts > 1]          # theor indices with collisions
+		ambiguous_mask = np.isin(min_idxs, colliding_js)
+		matched_theor[ambiguous_mask] = (np.nan,np.nan)		
+
+
 	df = pd.DataFrame({
 		'x_obs': obs[:, 0],
 		'y_obs': obs[:, 1],
@@ -151,9 +194,7 @@ def filter_lat(ij,obs,param,max_d=0):
 	#return lookup_t,ij_inuse
 	df.loc[df['distance'] >= max_d, 'distance'] = np.nan
 	df.loc[df['distance'] >= max_d, 'lookup_t'] = np.nan
-	
-	#legacy_output = np.array([df['x_theor'].values,df['y_theor'].values])
-	
+		
 	return df
 
 def cost_function(f_obs,f_theor):
@@ -247,6 +288,12 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I_gauss','I0'])
 		
 	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
+	len1 = len(observed_xy)
+	observed_xy = remove_close_points(observed_xy)
+	len2 = len(observed_xy)
+	if len2 != len1:
+		print('A few observed points were omitted due to repeat: ',str(len1-len2))
+	
 	df_raw[['x_obs', 'y_obs']] = observed_xy
 	
 	if not sub_area is None:
@@ -384,7 +431,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 			
 			ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
 				extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
-			sc.set_offsets(np.c_[th_relevant])     # update the scatter in-place
+			sc.set_offsets(np.c_[th_relevant])	 # update the scatter in-place
 			
 			#update set of zeros
 			param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)

@@ -28,7 +28,7 @@ Known issues and TODO:
  - check extra shift
  - (done) move load_frame outside of the fit function
  - double-check rotations for vmap
- - double-check kernel4 function, which computes difference on the basis of 4 nearest neighbours
+ - (partially) double-check kernel4 function, which computes difference on the basis of 4 nearest neighbours
  
 Acknowledgements:
  - Lewys Jones for ideas and supervision

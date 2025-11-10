@@ -131,7 +131,7 @@ def remove_close_points(points, threshold=1e-4):
 	return points[keep]
 '''
 
-def remove_close_points(points, threshold=1e-4):
+def mask_close_points(points, threshold=1e-4):
 	points = np.asarray(points, dtype=float)
 	tree = cKDTree(points)
 	pairs = tree.query_pairs(threshold)   # all pairs within threshold
@@ -144,7 +144,7 @@ def remove_close_points(points, threshold=1e-4):
 
 	mask = np.ones(len(points), dtype=bool)
 	mask[list(to_remove)] = False
-	return points[mask]
+	return mask
 	
 def filter_lat(ij,obs,param,max_d=0):
 	#TODO param[i] is not reliable; has to be replaced by a,b ref
@@ -219,7 +219,7 @@ def get_diff(par,raw_par,fit_flags,ij_cr,obs_cr,lookup_t,max_lim):
 	return diff
 
 
-def calculate_rel_diff(df,labels_raw,relative_to,kernel=1):
+def calculate_rel_diff(df,labels_raw,relative_to,kernel=4):
 	labels_i = [i for i,_ in enumerate(labels_raw) ]
 	relative_to_i = labels_raw.index(relative_to)	
 	
@@ -259,20 +259,21 @@ def kernel4(df,i,j):##TODO##TODO###TODO###
 	#picked = df.reindex(look)
 	#print(df.columns)
 	#s = [np.array(x) for x in df.reindex(l).to_numpy()]
-	try:
-		s = np.array([np.array(df.loc[d]) if d in df.index else np.array([np.nan, np.nan]) for d in l ])
-	except:
-		s = np.array([np.nan,np.nan])
+	
+	#try:
+	s = np.array([np.array(df.loc[d]) if d in df.index else np.array([np.nan, np.nan]) for d in l ])
+	#except:
+	#	s = np.array([np.nan,np.nan])
 	#s = np.stack([np.asarray(df[d].values if d in df.index else [None, None]) for d in l])
 	#print(s)
 	#s = np.array(s,dtype=float)
 	#print(s)
 	#s = picked['val'].to_numpy()
 	#print(s)
-	try:
-		return np.sum(s, axis=0)/4.
-	except:
-		return np.array([np.nan,np.nan]) #sometimes there is a 'list' appearing here ##BUG### 
+	#try:
+	return np.sum(s, axis=0)/4.
+	#except:
+	#	return np.array([np.nan,np.nan]) #sometimes there is a 'list' appearing here ##BUG### 
 
 def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_shift_ab=None,max_dist=0,sub_area=None):
 	#TODO proper pandas
@@ -286,24 +287,34 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 		#x0,y0,ell0,rot0,i_0 = np.load(folder+fname.split('.')[0]+'.npy')
 	else:
 		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I_gauss','I0'])
+	
+	
+	
 		
 	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
+	df_raw[['x_obs', 'y_obs']] = observed_xy	
+
+	mask_xy = mask_close_points(observed_xy) #here we are assessing a SI coordinates difference; is it better or worse than pixel-based?
+	df_raw['mask_obs'] = mask_xy
+	
 	len1 = len(observed_xy)
-	observed_xy = remove_close_points(observed_xy)
-	len2 = len(observed_xy)
+	len2 = len(observed_xy[mask_xy])
 	if len2 != len1:
-		print('A few observed points were omitted due to repeat: ',str(len1-len2))
+		print('A few observed points were omitted due to repeat: ',str(len1-len2))#legacy, we can just do sum(~mask_xy)
 	
-	df_raw[['x_obs', 'y_obs']] = observed_xy
+
 	
-	if not sub_area is None:
+	df_raw.loc[df_raw['mask_obs'] == False, 'x_obs'] = np.nan
+	df_raw.loc[df_raw['mask_obs'] == False, 'y_obs'] = np.nan
+	
+	if not sub_area is None: #here crop happens
 		df_raw.loc[df_raw['x_obs'] < sub_area[0], 'x_obs'] = np.nan
 		df_raw.loc[df_raw['x_obs'] > sub_area[1], 'x_obs'] = np.nan
 		df_raw.loc[df_raw['y_obs'] < sub_area[2], 'y_obs'] = np.nan
 		df_raw.loc[df_raw['y_obs'] > sub_area[3], 'y_obs'] = np.nan
-		df_raw = df_raw.dropna()
-		observed_xy = np.array([ (i,j) for i,j in df_raw[['x_obs', 'y_obs']].values])
 		
+	df_raw = df_raw.dropna()
+	observed_xy = np.array([ (i,j) for i,j in df_raw[['x_obs', 'y_obs']].values])
 		
 	ij = gen_ij((-170,170))
 
@@ -325,16 +336,18 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 	param_vec,fit_param_vec = vectorize_params(lat_params,motif)
 	print(param_vec)
 	#get roughly relevant ij - and theor - from the size estimation
-	theor,ij_cr,_ = get_coords_from_ij(ij,param_vec,max_lim,crop=True)
-	theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
+	_,ij_cr,_ = get_coords_from_ij(ij,param_vec,max_lim,crop=True)
+	#theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
 	
 	
 	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=max_dist)
+	
 	l1 = len(df_raw['x_obs'].values)
 	l2 = len(tmp_df['x_obs'].values)
 	if l1 != l2:
 		print(l1,l2)
 		raise IOError
+	
 	#print(df_raw,tmp_df)
 	lookup_df = pd.merge(df_raw, tmp_df, on=['x_obs', 'y_obs'], how='inner')
 	l3 = len(lookup_df['x_obs'].values)
@@ -348,6 +361,8 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 	#lookup_df_cl = lookup_df_cl.dropna()
 	
 	#print(ij_inuse)
+	
+	#lookup_df = lookup_df.dropna()
 	
 	#th_relevant = np.array([ theor[int(i)] for i in lookup_t if not np.isnan(i)])
 	th_relevant = np.array(lookup_df[['x_theor','y_theor']].values)
@@ -363,7 +378,7 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 
 
 def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show_initial_spots=False,vec_scale=0.05,
-			do_fit=True,relative_to=None,kernel=1,extra_shift_ab=None,sub_area=None,max_dist=0):
+			do_fit=True,relative_to=None,kernel=4,extra_shift_ab=None,sub_area=None,max_dist=0):
 	if not do_fit:
 		recall_zero=False
 	
@@ -372,8 +387,8 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 	
 	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
 
-	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
-									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
+	ij_cr, th_relevant, observed_xy, _, _ = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area) #This one for a preview; no need to load the dataframe
 	
 
 
@@ -429,7 +444,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 			lat_params['base'][0] = s_shx.val
 			lat_params['base'][1] = s_shy.val
 			
-			ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+			ij_cr, th_relevant, _, _, _ = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
 				extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
 			sc.set_offsets(np.c_[th_relevant])	 # update the scatter in-place
 			

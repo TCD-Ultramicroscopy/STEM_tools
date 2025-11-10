@@ -35,6 +35,9 @@ def gen_ij(ij_range):
 	return ij_set
 
 def get_coords_from_ij(ij,param_vec,max_lim,crop=False):
+
+	#TODO de-vec function here? #unpack_vector(param_vec,lat_params,motif)
+	
 	#de-vectorize
 	a,b,gamma = param_vec[:3]
 	shx,shy,phi = param_vec[3:6]
@@ -106,30 +109,6 @@ def get_coords_from_ij(ij,param_vec,max_lim,crop=False):
 		ij_ref_cr = ij_ref
 		
 	return cr_lat,cr_ij,ij_ref
-
-'''
-def remove_close_points(points, threshold=1e-4):
-	points = np.asarray(points, dtype=float)
-	N = len(points)
-	if N == 0:
-		print('Empty array of points!')
-		raise IOError
-
-	# Pairwise distance matrix
-	D = cdist(points, points, metric='euclidean')
-
-	# We'll keep the first occurrence and drop later near-duplicates
-	keep = np.ones(N, dtype=bool)
-
-	for i in range(N):
-		if not keep[i]:
-			continue
-		# mark all later points within threshold as duplicates
-		close_mask = (D[i, i+1:] < threshold)
-		keep[i+1:][close_mask] = False
-
-	return points[keep]
-'''
 
 def mask_close_points(points, threshold=1e-4):
 	points = np.asarray(points, dtype=float)
@@ -203,7 +182,8 @@ def cost_function(f_obs,f_theor):
 	
 	#sqrt - linear dist
 	#diff = np.sqrt(diff)
-	#square dist now
+	
+	#square dist now #TODO more transparent way to define weights
 	tot_dist = sum(diff)/len(diff)
 	return tot_dist
 
@@ -252,28 +232,10 @@ def calculate_rel_diff(df,labels_raw,relative_to,kernel=4):
 	
 def kernel4(df,i,j):##TODO##TODO###TODO###
 	l = [(i,j),(i+1,j),(i,j+1),(i+1,j+1)]
-	#print([ref_q.get(d, np.nan) for d in l])
-	#print(df)
-	#s = [ref_q.get(d, [None, None]).values for d in l]
-	#look = pd.MultiIndex.from_tuples(l, names=['i', 'j'])
-	#picked = df.reindex(look)
-	#print(df.columns)
-	#s = [np.array(x) for x in df.reindex(l).to_numpy()]
-	
-	#try:
+
 	s = np.array([np.array(df.loc[d]) if d in df.index else np.array([np.nan, np.nan]) for d in l ])
-	#except:
-	#	s = np.array([np.nan,np.nan])
-	#s = np.stack([np.asarray(df[d].values if d in df.index else [None, None]) for d in l])
-	#print(s)
-	#s = np.array(s,dtype=float)
-	#print(s)
-	#s = picked['val'].to_numpy()
-	#print(s)
-	#try:
+
 	return np.sum(s, axis=0)/4.
-	#except:
-	#	return np.array([np.nan,np.nan]) #sometimes there is a 'list' appearing here ##BUG### 
 
 def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_shift_ab=None,max_dist=0,sub_area=None):
 	#TODO proper pandas
@@ -287,14 +249,12 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 		#x0,y0,ell0,rot0,i_0 = np.load(folder+fname.split('.')[0]+'.npy')
 	else:
 		df_raw = pd.DataFrame(dataset, columns=['x_obs0', 'y_obs0','ell0','rot0','I_gauss','I0'])
-	
-	
-	
-		
+				
 	observed_xy = np.array([ (i*calib,j*calib) for i,j in df_raw[['x_obs0', 'y_obs0']].values])
 	df_raw[['x_obs', 'y_obs']] = observed_xy	
 
-	mask_xy = mask_close_points(observed_xy) #here we are assessing a SI coordinates difference; is it better or worse than pixel-based?
+	#TODO here we are assessing a SI coordinates difference; is it better or worse than pixel-based?
+	mask_xy = mask_close_points(observed_xy) 
 	df_raw['mask_obs'] = mask_xy
 	
 	len1 = len(observed_xy)
@@ -302,8 +262,8 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 	if len2 != len1:
 		print('A few observed points were omitted due to repeat: ',str(len1-len2))#legacy, we can just do sum(~mask_xy)
 	
-
-	
+	#Here we are removing coincidences in obs
+	#might worth checking which one has nonzero I_gauss
 	df_raw.loc[df_raw['mask_obs'] == False, 'x_obs'] = np.nan
 	df_raw.loc[df_raw['mask_obs'] == False, 'y_obs'] = np.nan
 	
@@ -355,24 +315,9 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 		print(l1,l2,l3)
 		raise IOError
 	
-	#lookup_t = lookup_df['lookup_t'].values
-	#print(lookup_df)
-	#lookup_df_cl = lookup_df.copy()
-	#lookup_df_cl = lookup_df_cl.dropna()
-	
-	#print(ij_inuse)
-	
-	#lookup_df = lookup_df.dropna()
-	
-	#th_relevant = np.array([ theor[int(i)] for i in lookup_t if not np.isnan(i)])
 	th_relevant = np.array(lookup_df[['x_theor','y_theor']].values)
-	#print(th_relevant)
 	obs_cr = np.array(lookup_df[['x_obs','y_obs']].values)#observed_xy[~np.isnan(lookup_t)]
 
-
-	#ij_inuse_cleared = np.array(ij_inuse[~np.isnan(ij_inuse)]).reshape(-1,2).astype(int)
-	#print(ij_inuse,ij_inuse_cleared)
-	
 	return ij_cr, th_relevant, observed_xy, obs_cr, lookup_df
 
 

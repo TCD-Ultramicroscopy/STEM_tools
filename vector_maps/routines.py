@@ -45,7 +45,8 @@ def unpack_vector(param_vec,lat_params,motif):
 	outputs:
 		lat_params - dict, renewed dict of the lattice params
 		motif2 - dict, renewed dict of the atomic motif params		
-	'''	
+	'''
+	
 	abg = param_vec[:3]
 	sh = param_vec[3:6]
 	lat_params['abg'] = abg
@@ -355,36 +356,4 @@ def plot_output_page_diff(fname,folder):
 	plt.tight_layout()
 	plt.savefig(folder+"_panel_2.png", dpi=400, bbox_inches="tight")
 	#plt.show()
-'''
-def vector_map_calc(phi,obs,calc):
-	#phi = param[2]/180*np.pi
-	#fin_lat = get_coords_from_ij(f_ij,param,no_modulation,only_ortho,max_lim)[0]
-	
-	vdiff_xy = obs - calc
-	vdiff_ref = np.mean(vdiff_xy,axis=0)
-	
-	vproj = [(x*np.cos(phi) + y*np.sin(phi), y*np.cos(phi) - x*np.sin(phi)) for x,y in vdiff_xy]
-	print(np.std(vproj,axis=0))
-	print(np.std(vdiff_xy,axis=0))
-	print('ref',vdiff_ref)
-	print('Std rot',np.sqrt(np.sum(np.std(vproj,axis=0)**2)),'len',len(vproj))
-	print('Std raw',np.sqrt(np.sum(np.std(vdiff_xy,axis=0)**2)),'len',len(vdiff_xy))
-	
-	#std_to_report = np.std(vproj,axis=0)
-	
-	
-	vdist = np.sqrt(np.sum(vdiff_xy**2,axis=1))
-	vdiff_xy_corr = vdiff_xy - vdiff_ref
-	print('Test dist',sum(vdist)/len(vdist))
-	#print(np.mean(vdiff_xy_corr,axis=0))
-	
-	#print(np.std(abs(vdiff_xy_corr),axis=0))
-	ang = [np.arctan2(j,i) for i,j in vdiff_xy]
-	ang_corr = [np.arctan2(j,i) for i,j in vdiff_xy_corr] #np.angle(vdiff_xy, deg=True)
-	
-	std_to_report = np.std(abs(vdiff_xy),axis=0)
-	#vdist = np.sqrt(np.sum(vdiff_xy**2,axis=1))
-	#str_mean = plot_stats_rep(vdist,fname_save)
-	
-	return std_to_report,vdist,vdiff_xy,vdiff_ref,vdiff_xy_corr,ang,ang_corr
-'''
+

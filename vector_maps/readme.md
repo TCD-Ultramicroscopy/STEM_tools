@@ -11,24 +11,21 @@ The algorithm of usage is the following:
 
 Known issues and TODO:
 
- - (done) preview is needed
+ - [major] revisit the handling of parameters to allow equations
  - code cleanup is required
  - more comments needed
  - re-fit by 2D gaussian call from 'fit_lattice' is currently not working properly, to fix
- - (done) image processing functions to be extracted to one lib, refinement-related to another
- - (done) support for [110]PC lattice to be implemented
  - support for simultaneous imaging (BF/DF) to be considered
  - starting lattice parameters can be estimated by FFT
  - residuals of 2D gauss fit to be visualized
+ - average unit cell picture to be rendered
  - add auto-assessment for max/min i,j values (number of unit cells in use)
  - (?) use diffpy to handle fraq coordinates
  - use a dedicated min for negative distances
- - (done) sub-array for pre-fit
- 		allowed by sub_area
  - check extra shift
- - (done) move load_frame outside of the fit function
- - double-check rotations for vmap
- - (partially) double-check kernel4 function, which computes difference on the basis of 4 nearest neighbours
+ - double-check rotations for images and vmaps
+ - (done; keep track) double-check kernel4 function, which computes difference on the basis of 4 nearest neighbours
+ - (?) dask for pandas
  
 Acknowledgements:
  - Lewys Jones for ideas and supervision

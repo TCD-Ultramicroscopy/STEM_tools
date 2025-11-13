@@ -30,3 +30,5 @@ Known issues and TODO:
 Acknowledgements:
  - Lewys Jones for ideas and supervision
  - Project SFI/21/US/3785 for financial support
+
+Part of the code has been created with AI assistance (OpenAI GPT-5) and manually reviewed

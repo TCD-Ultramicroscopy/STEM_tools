@@ -17,7 +17,7 @@ import cv2
 
 from routines import *
 from plot_routines import *
-
+from dicts_handling import *
 
 from matplotlib.widgets import Slider, Button
 
@@ -34,19 +34,22 @@ def gen_ij(ij_range):
 	
 	return ij_set
 
-def get_coords_from_ij(ij,param_vec,max_lim,crop=False):
-
-	#TODO de-vec function here? #unpack_vector(param_vec,lat_params,motif)
-	
+def get_coords_from_ij(ij,param_vec,max_lim,lat_params, motif_r, extra_pars,crop=False):
+	#print(param_vec, lat_params, motif_r, extra_pars)
+	lat,motif,extr = unpack_to_dicts(param_vec, lat_params, motif_r, extra_pars)
 	#de-vectorize
-	a,b,gamma = param_vec[:3]
-	shx,shy,phi = param_vec[3:6]
+	a,b,gamma = lat['abg']
+	shx,shy,phi = lat['base']
 
 	phi = phi/180.*np.pi
 	gamma = gamma/180.*np.pi
 	
-	coords_vec = param_vec[6:]
-	coord_fraq = coords_vec.reshape(-1,2)
+	
+	#coords_vec = param_vec[6:]
+	#coord_fraq = coords_vec.reshape(-1,2)
+	motif_keys = list(motif.keys())
+	motif_vec = np.concatenate([motif[i]['coord'] for i in motif_keys if motif[i]['use'] ])
+	coord_fraq = motif_vec.reshape(-1,2)
 	
 	#fractional to cartesian, for all atoms within u.c.
 	fraq_a = coord_fraq[:,0]
@@ -125,13 +128,14 @@ def mask_close_points(points, threshold=1e-4):
 	mask[list(to_remove)] = False
 	return mask
 	
-def filter_lat(ij,obs,param,max_d=0):
+def filter_lat(ij,obs,param,lat_params, motif, extra_pars,max_d=0):
+
 	#TODO param[i] is not reliable; has to be replaced by a,b ref
 	if max_d == 0:
 		max_d = np.sqrt((param[0]/4)**2+(param[1]/4)**2)
 
 
-	theor,_,ij_ref = get_coords_from_ij(ij,param,None,crop=False)
+	theor,_,ij_ref = get_coords_from_ij(ij,param,None,lat_params, motif, extra_pars,crop=False)
 
 	n = len(theor) // len(ij)
 	n_arr = np.arange(n)
@@ -139,8 +143,44 @@ def filter_lat(ij,obs,param,max_d=0):
 	
 	print('now, shapes: ij - %s, theor - %s' % (str(np.array(ij).shape), str(theor.shape)) )
 	
+	
 	dist_matrix = cdist(obs, theor)
 	min_dists = np.min(dist_matrix, axis=1)
+	min_idxs  = np.argmin(dist_matrix, axis=1)
+
+	'''
+	# sort obs indices by their best distance (smallest first)
+	order = np.argsort(min_dists)
+
+	used_theor = np.zeros(len(theor), dtype=bool)
+	keep_mask = np.zeros(len(obs), dtype=bool)
+
+	for i in order:
+		j = min_idxs[i]
+		if not used_theor[j]:
+			used_theor[j] = True
+			keep_mask[i] = True
+		# else: this obs[i] loses the competition for theor[j]
+
+	# filtered matches (one-to-one, nearest wins)
+	# Build matched arrays (preserve full length)
+	matched_theor = theor[min_idxs].copy()
+	matched_ij    = ij_ref[min_idxs].copy()
+	matched_motif = motif[min_idxs].copy()
+	matched_dists = min_dists.copy()
+	matched_idx = min_idxs.copy()
+	
+
+	# Fill outcasts (colliding ones) with NaN
+	matched_theor[~keep_mask] = np.nan
+	matched_dists[~keep_mask] = np.nan
+	matched_ij[~keep_mask] = 0
+	matched_motif[~keep_mask] = 0
+	matched_idx[~keep_mask] = 0
+	'''
+	#'''
+	dist_matrix = cdist(obs, theor)
+	matched_dists = np.min(dist_matrix, axis=1)
 	min_idxs = np.argmin(dist_matrix, axis=1)
 
 	matched_theor = theor[min_idxs]
@@ -153,11 +193,10 @@ def filter_lat(ij,obs,param,max_d=0):
 		#min_idxs = np.unique(min_idxs)
 		#raise IOError
 		unique_js, counts = np.unique(min_idxs, return_counts=True)
-		colliding_js = unique_js[counts > 1]          # theor indices with collisions
+		colliding_js = unique_js[counts > 1]		  # theor indices with collisions
 		ambiguous_mask = np.isin(min_idxs, colliding_js)
-		matched_theor[ambiguous_mask] = (np.nan,np.nan)		
-
-
+		matched_theor[ambiguous_mask] = (np.nan,np.nan)	
+	#'''
 	df = pd.DataFrame({
 		'x_obs': obs[:, 0],
 		'y_obs': obs[:, 1],
@@ -166,8 +205,8 @@ def filter_lat(ij,obs,param,max_d=0):
 		'i': matched_ij[:, 0],
 		'j': matched_ij[:, 1],
 		'motif': matched_motif,
-		'distance': min_dists,
-		'lookup_t':min_idxs
+		'distance': matched_dists,
+		'lookup_t':min_idxs#matched_idx
 		})
 		
 	#return lookup_t,ij_inuse
@@ -188,12 +227,21 @@ def cost_function(f_obs,f_theor):
 	return tot_dist
 
 
-def get_diff(par,raw_par,fit_flags,ij_cr,obs_cr,lookup_t,max_lim):
+def get_diff(par,indep_idx, eq_mask, eq_funcs,ij_cr,obs_cr,lookup_t,max_lim,lat_params, motif, extra_pars):
 	#we need to variate only those params selected by fit booleans
-	corr_par = np.array([ par[i] if fit_flags[i] else raw_par[i] for i in np.arange(len(fit_flags)) ])
+	#corr_par = np.array([ par[i] if fit_flags[i] else raw_par[i] for i in np.arange(len(fit_flags)) ])
 	
-	theor_tmp,_,_ = get_coords_from_ij(ij_cr,corr_par,max_lim)
+	layout = build_layout(lat_params, motif, extra_pars)
+	param_vec, fit = init_param_and_fit(lat_params, motif, extra_pars, layout)
+	eq_mask, eq_funcs = compile_equations(lat_params, motif, extra_pars, layout)
+	indep_idx = build_independent_index(fit, eq_mask)
+
+	#param_vec = inflate_params(x0, param_vec, indep_idx, eq_mask, eq_funcs)
+	
+	corr_par = inflate_params(par, param_vec, indep_idx, eq_mask, eq_funcs)
+	theor_tmp,_,_ = get_coords_from_ij(ij_cr,corr_par,max_lim,lat_params, motif, extra_pars)
 	theor = np.array([ theor_tmp[int(i)] for i in lookup_t if not np.isnan(i)])
+	#print(obs_cr,theor)
 
 	diff = cost_function(obs_cr,theor)
 	return diff
@@ -237,7 +285,7 @@ def kernel4(df,i,j):##TODO##TODO###TODO###
 
 	return np.sum(s, axis=0)/4.
 
-def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_shift_ab=None,max_dist=0,sub_area=None):
+def preprocess_dataset(lat_params,motif,extra_pars,dataset,calib,recall_zero=False,extra_shift_ab=None,max_dist=0,sub_area=None):
 	#TODO proper pandas
 	#print(dataset.shape)
 	if min(dataset.shape) == 2:
@@ -286,21 +334,21 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 	#we can convert it to (x,y) with the standard functionality as a r-vector to the (shx,shy) for u.c. with ij [0,0]
 	if not extra_shift_ab is None:
 		print(np.array(list(lat_params['abg'])+list(lat_params['base'])+list(extra_shift_ab)))
-		tmp_val,_,_ = get_coords_from_ij(np.array([(0,0)]),np.array(list(lat_params['abg'])+list(lat_params['base'])+list(extra_shift_ab)),max_lim,crop=False)
+		tmp_val,_,_ = get_coords_from_ij(np.array([(0,0)]),np.array(list(lat_params['abg'])+list(lat_params['base'])+list(extra_shift_ab)),max_lim,lat_params, motif, extra_pars,crop=False)
 		tmp_val = tmp_val[0]
 		print(lat_params['base'])
 		lat_params['base'] = [lat_params['base'][0]+tmp_val[0],lat_params['base'][1]+tmp_val[1],lat_params['base'][2]]
 		print(lat_params['base'])
 		
 	#vectors to construct theor from ij
-	param_vec,fit_param_vec = vectorize_params(lat_params,motif)
+	param_vec,fit_param_vec,_,_ = dicts_to_vector(lat_params, motif, extra_pars)
 	print(param_vec)
 	#get roughly relevant ij - and theor - from the size estimation
-	_,ij_cr,_ = get_coords_from_ij(ij,param_vec,max_lim,crop=True)
+	_,ij_cr,_ = get_coords_from_ij(ij,param_vec,max_lim,lat_params, motif, extra_pars,crop=True)
 	#theor,_,_ = get_coords_from_ij(ij_cr,param_vec,max_lim,crop=False)
 	
 	
-	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,max_d=max_dist)
+	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,lat_params, motif, extra_pars,max_d=max_dist)
 	
 	l1 = len(df_raw['x_obs'].values)
 	l2 = len(tmp_df['x_obs'].values)
@@ -322,7 +370,7 @@ def preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=False,extra_sh
 
 
 
-def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show_initial_spots=False,vec_scale=0.05,
+def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_zero=False,show_initial_spots=False,vec_scale=0.05,
 			do_fit=True,relative_to=None,kernel=4,extra_shift_ab=None,sub_area=None,max_dist=0):
 	if not do_fit:
 		recall_zero=False
@@ -332,8 +380,8 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 	
 	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
 
-	ij_cr, th_relevant, observed_xy, _, _ = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
-									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area) #This one for a preview; no need to load the dataframe
+	ij_cr, th_relevant, observed_xy, _, _ = preprocess_dataset(lat_params,motif,extra_pars,dataset,calib,recall_zero=recall_zero,
+							extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area) #This one for a preview; no need to load the dataframe
 	
 
 
@@ -342,8 +390,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 		m_zeros = {'0':{'coord':(0.,0.),
 				'use':True,
 				'fit':[False,False]}}
-		param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)
-		zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,crop=False)
+		#param_vec_zeros,_ = vectorize_params(lat_params,m_zeros,extra_pars)
+		param_vec_zeros,_,_,_ = dicts_to_vector(lat_params, m_zeros, extra_pars)
+		
+		zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,lat_params, m_zeros, extra_pars,crop=False)
 		
 		_im = cv2.imread(folder+fname+'.tif', cv2.IMREAD_UNCHANGED)
 		H, W = _im.shape[:2]
@@ -374,7 +424,8 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 		s_a = Slider(ax_a, 'a', valmin=lat_params['abg'][0]*.5, valmax=lat_params['abg'][0]*1.5, valinit=lat_params['abg'][0], valstep=0.001)
 		s_b = Slider(ax_b, 'b', valmin=lat_params['abg'][1]*.75, valmax=lat_params['abg'][1]*1.25, valinit=lat_params['abg'][1], valstep=0.001)
 		s_g = Slider(ax_g, 'g', valmin=lat_params['abg'][2]*.75, valmax=lat_params['abg'][2]*1.25, valinit=lat_params['abg'][2], valstep=0.1)
-		s_r = Slider(ax_ph, 'phi', valmin=min(lat_params['base'][2]*.5,-5), valmax=max(lat_params['base'][2]*1.5,5), valinit=lat_params['base'][2], valstep=0.01)
+		s_r = Slider(ax_ph, 'phi', valmin=-90, valmax=90, valinit=lat_params['base'][2], valstep=0.5)
+		#s_r = Slider(ax_ph, 'phi', valmin=min(lat_params['base'][2]*.5,-5), valmax=max(lat_params['base'][2]*1.5,5), valinit=lat_params['base'][2], valstep=0.01)
 		
 		avg_par = lat_params['abg'][0]/2 + lat_params['abg'][1]/2
 		s_shx = Slider(ax_shx, 'shx', valmin=-avg_par/2, valmax=avg_par/2, valinit=lat_params['base'][0], valstep=0.001)
@@ -389,15 +440,19 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 			lat_params['base'][0] = s_shx.val
 			lat_params['base'][1] = s_shy.val
 			
-			ij_cr, th_relevant, _, _, _ = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+			ij_cr, th_relevant, _, _, _ = preprocess_dataset(lat_params,motif,extra_pars,
+										dataset,calib,recall_zero=recall_zero,
 				extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
 			sc.set_offsets(np.c_[th_relevant])	 # update the scatter in-place
 			
 			#update set of zeros
-			param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)
-			zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,crop=False)
+			#param_vec_zeros,_ = vectorize_params(lat_params,m_zeros)
+			param_vec_zeros,_,_,_ = dicts_to_vector(lat_params, m_zeros, extra_pars)
+			zeros,_,_ = get_coords_from_ij(ij_cr,param_vec_zeros,max_lim,lat_params, m_zeros, extra_pars,crop=False)
 			sc0.set_offsets(np.c_[zeros])
 			fig.canvas.draw_idle()
+		
+		
 			
 		s_a.on_changed(update)
 		s_b.on_changed(update)
@@ -409,12 +464,13 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 		ax_reset = fig.add_axes([0.87, 0.25, 0.08, 0.08])
 		btn = Button(ax_reset, 'Reset')
 		btn.on_clicked(lambda evt: (s_a.reset(), s_b.reset(), s_r.reset(), s_shx.reset(), s_shy.reset(), s_g.reset()))
-		
+			
 		plt.show()
 		print('Params',lat_params)
 
 
-	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,dataset,calib,recall_zero=recall_zero,
+	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,extra_pars,
+											dataset,calib,recall_zero=recall_zero,
 									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
 
 	lookup_t = lookup_df['lookup_t'].values
@@ -430,17 +486,37 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 	#metadata['std'] = std
 
 
-	param_vec,fit_param_vec = vectorize_params(lat_params,motif) 
-	if do_fit:
-		res = scipy.optimize.minimize(get_diff,param_vec, args=(param_vec,fit_param_vec,ij_cr,obs_cr,lookup_t,max_lim))
-		#print(res)
+	#param_vec,fit_param_vec = vectorize_params(lat_params,motif)
+	layout = build_layout(lat_params, motif, extra_pars)
+	param_vec, fit = init_param_and_fit(lat_params, motif, extra_pars, layout)
+	eq_mask, eq_funcs = compile_equations(lat_params, motif, extra_pars, layout)
+	indep_idx = build_independent_index(fit, eq_mask)
+	x0 = param_vec[indep_idx]
+	
+	
+	print("layout.motif:", layout['motif'])
+	ix, iy = layout['motif']['A_1c']
+	print("A_1c indices:", ix, iy)
+	print("eq_mask at A_1c:", eq_mask[ix], eq_mask[iy])
+	print("in indep_idx:", ix in indep_idx, iy in indep_idx)
+	
+	if do_fit:	
+		res = scipy.optimize.minimize(get_diff, x0, args=(indep_idx, eq_mask, eq_funcs,
+										ij_cr,obs_cr,lookup_t,max_lim,
+										lat_params, motif, extra_pars))
+		print(res)
 		print('Residual',res.fun)
 				
 		metadata['residual_in_pm'] = np.sqrt(res.fun)*1000
-		param_vec = res.x
+		param_vec = inflate_params(res.x, param_vec, indep_idx, eq_mask, eq_funcs)
+		print('postrun pars',param_vec)
 		#metadata['param'] = res.x
 		#metadata['a/b'] = res.x[0]/res.x[1]
 		#err = get_errors(res)
+	else:
+
+		param_vec = inflate_params(x0, param_vec, indep_idx, eq_mask, eq_funcs) #to apply equations
+		#print('prerun pars',param_vec)		
 
 	metadata['param'] = param_vec
 	
@@ -458,7 +534,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 	theor_rel_lat = am.Sublattice(th_relevant/calib, image=s, color='r') #before refinement, filtered to paired ones
 	
 
-	theor_res,_,_ = get_coords_from_ij(ij_cr,param_vec.copy(),max_lim,crop=False)
+	theor_res,_,_ = get_coords_from_ij(ij_cr,param_vec.copy(),max_lim,lat_params, motif, extra_pars,crop=False)
 	theor_res_rel = [ theor_res[int(i)] if not np.isnan(i) else (np.nan,np.nan) for i in lookup_t ]
 	lookup_df[['x_theor_new','y_theor_new']] = np.array(theor_res_rel, dtype='float')
 	#theor_res_rel = theor_res_rel[~np.isnan(theor_res_rel)]
@@ -468,7 +544,8 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 	refined_rel_lat = am.Sublattice(np.array(theor_res_rel)/calib, image=s, color='r') #refined filtered to paired ones
 
 
-	lat_params_fin,_ = unpack_vector(param_vec,lat_params,motif)
+	#lat_params_fin,_ = unpack_vector(param_vec,lat_params,motif)
+	lat_params_fin,_,_ = unpack_to_dicts(param_vec, lat_params, motif, extra_pars)
 	phi = lat_params_fin['base'][2]
 	
 		
@@ -517,10 +594,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 		vdiff_xy_corr = np.array(diff_df['vdiff_xy_corr_rel'].tolist())
 		
 	if not sf is None:
-		if do_fit:
-			export_data(folder,sf,fname,res.x,lat_params,motif,metadata)
-		else:
-			export_data(folder,sf,fname,param_vec,lat_params,motif,metadata)
+		#if do_fit:
+		export_data(folder,sf,fname,param_vec,lat_params,motif,extra_pars,metadata)
+		#else:
+		#	export_data(folder,sf,fname,param_vec,lat_params,motif,extra_pars,metadata)
 
 		if relative_to is None:	
 			#plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
@@ -562,9 +639,6 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,recall_zero=False,show
 		plot_output_page(fname,folder + sf + '/')
 		plot_output_page_diff(fname,folder + sf + '/')
 	
-	if do_fit:
-		return metadata, res.x
-	else:
-		return metadata, param_vec
+	return metadata, param_vec
 	
 	

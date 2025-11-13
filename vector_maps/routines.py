@@ -15,6 +15,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
+from dicts_handling import unpack_to_dicts
+
 def rotate_vec(v,an):
 	'''
 	Rotate 2-vector in plane
@@ -34,9 +36,9 @@ def rotate_vec(v,an):
 	y = vy*c+vx*s
 	#print(x,y)
 	return x,y
-
+'''
 def unpack_vector(param_vec,lat_params,motif):
-	'''
+	''
 	Reshape the vector of variables to dicts using the structure of dicts provided
 	inputs:
 		param_vec - list, vector of parameters
@@ -45,7 +47,7 @@ def unpack_vector(param_vec,lat_params,motif):
 	outputs:
 		lat_params - dict, renewed dict of the lattice params
 		motif2 - dict, renewed dict of the atomic motif params		
-	'''
+	''
 	
 	abg = param_vec[:3]
 	sh = param_vec[3:6]
@@ -64,9 +66,13 @@ def unpack_vector(param_vec,lat_params,motif):
 		c+=1
 
 	return lat_params,motif2
-	
+'''
+
+
+
+'''	
 def vectorize_params(lat_params,motif):
-	'''
+	''
 	Reshape dicts of variables to a vector, if corresponding keys are set in dicts
 	inputs:
 		lat_params - dict, dict of the lattice params
@@ -74,7 +80,7 @@ def vectorize_params(lat_params,motif):
 	outputs:
 		param_vec - list, vector of relevant parameters
 		fit_vec - list, vector of boolean values to identify parameters as variables for refinement		
-	'''	
+	''	
 	lat_vec = np.concatenate((lat_params['abg'],lat_params['base']))
 	lat_fit = np.concatenate((lat_params['fit_abg'],lat_params['fit_base']))
 	
@@ -91,6 +97,9 @@ def vectorize_params(lat_params,motif):
 	fit_vec = np.concatenate((lat_fit,motif_fit))
 	
 	return param_vec,fit_vec
+'''
+
+
 
 def load_frame(folder,fname,calib_size_by_px): #TODO - we do not really have to have a tiff
 	'''
@@ -122,7 +131,7 @@ def load_frame(folder,fname,calib_size_by_px): #TODO - we do not really have to 
 	
 	return s
 	
-def export_data(folder,sf,fname,lat_params_vec,raw_lat_params,raw_motif,metadata):
+def export_data(folder,sf,fname,lat_params_vec,raw_lat_params,raw_motif,raw_extra_pars,metadata):
 	'''
 	Save variables as csv
 	
@@ -134,7 +143,8 @@ def export_data(folder,sf,fname,lat_params_vec,raw_lat_params,raw_motif,metadata
 		os.mkdir(folder+sf)
 		print('Folder %s created' % sf)
 
-	lat_params_fin,motif_fin = unpack_vector(lat_params_vec,raw_lat_params,raw_motif)
+	lat_params_fin, motif_fin, extra_pars_fin = unpack_to_dicts(lat_params_vec, raw_lat_params,raw_motif, raw_extra_pars)
+	#lat_params_fin,motif_fin = unpack_vector(lat_params_vec,raw_lat_params,raw_motif)
 	
 	export_name = folder+sf+'/'+fname.split('.')[0]+'_'+sf
 	
@@ -147,6 +157,8 @@ def export_data(folder,sf,fname,lat_params_vec,raw_lat_params,raw_motif,metadata
 	motif = pd.DataFrame.from_dict(motif_fin,orient='index')
 	motif.to_csv(export_name + '_motif.csv',sep='\t')
 
+	extra = pd.DataFrame.from_dict(extra_pars_fin,orient='index')
+	extra.to_csv(export_name + '_extra.csv',sep='\t')
 
 def vector_map_calc(phi,df):
 	#phi = param[2]/180*np.pi
@@ -202,6 +214,7 @@ def load_and_trim_cv2(path, white_threshold=245):
 	Load an image with OpenCV and trim (near-)white borders.
 	Keeps all non-white pixels intact.
 	Returns an array in RGB/RGBA for matplotlib.
+	Code has been created with AI assistance (OpenAI GPT-5) and manually reviewed
 	"""
 	path = str(Path(path))
 	img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
@@ -244,6 +257,9 @@ def imshow_no_axes(ax, im):
 	ax.set_axis_off()
 
 def plot_output_page(fname,folder):
+	'''
+	Code has been created with AI assistance (OpenAI GPT-5) and manually reviewed
+	'''
 	s = '_'+ folder.split('/')[-2]
 	pngs = {
 		"a": folder+'../'+fname+".png",
@@ -334,9 +350,13 @@ def plot_output_page(fname,folder):
 	# Optional: tight layout and save
 	plt.tight_layout()
 	plt.savefig(folder+"_panel_1.png", dpi=400, bbox_inches="tight")
+	plt.close()
 	#plt.show()
 
 def plot_output_page_diff(fname,folder):
+	'''
+	Code has been created with AI assistance (OpenAI GPT-5) and manually reviewed
+	'''
 	s = '_'+ folder.split('/')[-2]
 	files = [folder+fname+s + '_vmap_rotated.png',
 		folder+fname+s + '_vmap_proj_a.png',
@@ -355,5 +375,6 @@ def plot_output_page_diff(fname,folder):
 
 	plt.tight_layout()
 	plt.savefig(folder+"_panel_2.png", dpi=400, bbox_inches="tight")
+	plt.close()
 	#plt.show()
 

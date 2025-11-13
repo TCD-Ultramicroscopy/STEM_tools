@@ -57,8 +57,8 @@ def plot_violin(fname_save,labels,df):
 	#print(df)
 	pos = []
 	for i,j in enumerate(labels):
-		#all_I.append(df.loc[df['motif']==i,'I0'])
-		all_I.append(df.loc[df['motif']==i,'I_gauss'])
+		all_I.append(df.loc[df['motif']==i,'I0'])
+		#all_I.append(df.loc[df['motif']==i,'I_gauss'])
 		pos.append(i)#TODO check these numbers vs atomic sites N as in config
 	plt.violinplot(all_I,positions=pos)
 	plt.xticks(ticks=pos, labels=labels)

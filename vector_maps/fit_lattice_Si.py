@@ -76,7 +76,7 @@ fname = 'test_Si'
 
 #Calibrations. Only ratio is important
 #this 1024px frame was acquired from 90% area of 16nm scan
-calib = 16/1024*.9
+calib = 16/1024*.9 #units - nm per pixel
 
 
 #Manual presets for shifts/lattice rotations

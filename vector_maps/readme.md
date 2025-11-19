@@ -10,8 +10,8 @@ The algorithm of usage is the following:
  - outcome is a few vector plots of differences, some statistical data, and a number of csv files with refined parameters, ratios, and minimized value of distance
 
 Known issues and TODO:
-
- - [major] revisit the handling of parameters to allow equations
+ - [todo] the best match between theor and obs is preserved in the case of options
+ - [major][done] revisit the handling of parameters to allow equations
  - code cleanup is required
  - more comments needed
  - re-fit by 2D gaussian call from 'fit_lattice' is currently not working properly, to fix

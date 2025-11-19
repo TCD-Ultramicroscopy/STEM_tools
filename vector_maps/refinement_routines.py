@@ -148,41 +148,29 @@ def filter_lat(ij,obs,param,lat_params, motif, extra_pars,max_d=0):
 	min_dists = np.min(dist_matrix, axis=1)
 	min_idxs  = np.argmin(dist_matrix, axis=1)
 
-	'''
-	# sort obs indices by their best distance (smallest first)
-	order = np.argsort(min_dists)
-
-	used_theor = np.zeros(len(theor), dtype=bool)
-	keep_mask = np.zeros(len(obs), dtype=bool)
-
-	for i in order:
-		j = min_idxs[i]
-		if not used_theor[j]:
-			used_theor[j] = True
-			keep_mask[i] = True
-		# else: this obs[i] loses the competition for theor[j]
-
-	# filtered matches (one-to-one, nearest wins)
-	# Build matched arrays (preserve full length)
-	matched_theor = theor[min_idxs].copy()
-	matched_ij    = ij_ref[min_idxs].copy()
-	matched_motif = motif[min_idxs].copy()
-	matched_dists = min_dists.copy()
-	matched_idx = min_idxs.copy()
-	
-
-	# Fill outcasts (colliding ones) with NaN
-	matched_theor[~keep_mask] = np.nan
-	matched_dists[~keep_mask] = np.nan
-	matched_ij[~keep_mask] = 0
-	matched_motif[~keep_mask] = 0
-	matched_idx[~keep_mask] = 0
-	'''
-	#'''
 	dist_matrix = cdist(obs, theor)
-	matched_dists = np.min(dist_matrix, axis=1)
 	min_idxs = np.argmin(dist_matrix, axis=1)
+	matched_dists = dist_matrix[np.arange(len(obs)), min_idxs]
 
+	n_obs = obs.shape[0]
+	best_obs_mask = np.zeros(n_obs, dtype=bool)
+	
+	unique_js = np.unique(min_idxs)
+	for j in unique_js:
+		# all obs that want to match theor[j]
+		obs_candidates = np.where(min_idxs == j)[0]
+		if len(obs_candidates) == 1:
+			# only one obs wants this theor -> keep it
+			best_obs_mask[obs_candidates[0]] = True
+		else:
+			# several obs want the same theor -> keep the closest one
+			dists_here = dist_matrix[obs_candidates, j]
+			best_idx_local = obs_candidates[np.argmin(dists_here)]
+			best_obs_mask[best_idx_local] = True
+			# others are implicitly dropped
+	
+	'''
+	#more conservative version
 	matched_theor = theor[min_idxs]
 	matched_ij = ij_ref[min_idxs]
 	matched_motif = motif[min_idxs]
@@ -197,16 +185,24 @@ def filter_lat(ij,obs,param,lat_params, motif, extra_pars,max_d=0):
 		ambiguous_mask = np.isin(min_idxs, colliding_js)
 		matched_theor[ambiguous_mask] = (np.nan,np.nan)	
 	#'''
+	
+	matched_obs   = obs[best_obs_mask]
+	matched_theor = theor[min_idxs[best_obs_mask]]
+	matched_ij    = ij_ref[min_idxs[best_obs_mask]]
+	matched_motif = motif[min_idxs[best_obs_mask]]
+	matched_dists = matched_dists[best_obs_mask]
+
+	#Now, here we are dropping obs! has to be reflected in the output stats
 	df = pd.DataFrame({
-		'x_obs': obs[:, 0],
-		'y_obs': obs[:, 1],
+		'x_obs': matched_obs[:, 0],
+		'y_obs': matched_obs[:, 1],
 		'x_theor': matched_theor[:, 0],
 		'y_theor': matched_theor[:, 1],
 		'i': matched_ij[:, 0],
 		'j': matched_ij[:, 1],
 		'motif': matched_motif,
 		'distance': matched_dists,
-		'lookup_t':min_idxs#matched_idx
+		'lookup_t': min_idxs[best_obs_mask]
 		})
 		
 	#return lookup_t,ij_inuse
@@ -350,18 +346,18 @@ def preprocess_dataset(lat_params,motif,extra_pars,dataset,calib,recall_zero=Fal
 	
 	tmp_df = filter_lat(ij_cr,observed_xy,param_vec,lat_params, motif, extra_pars,max_d=max_dist)
 	
-	l1 = len(df_raw['x_obs'].values)
-	l2 = len(tmp_df['x_obs'].values)
-	if l1 != l2:
-		print(l1,l2)
-		raise IOError
+	#l1 = len(df_raw['x_obs'].values)
+	#l2 = len(tmp_df['x_obs'].values)
+	#if l1 != l2:
+	#	print(l1,l2)
+	#	raise IOError
 	
 	#print(df_raw,tmp_df)
 	lookup_df = pd.merge(df_raw, tmp_df, on=['x_obs', 'y_obs'], how='inner')
 	l3 = len(lookup_df['x_obs'].values)
-	if l1 != l3:
-		print(l1,l2,l3)
-		raise IOError
+	#if l1 != l3:
+	#	print(l1,l2,l3)
+	#	raise IOError
 	
 	th_relevant = np.array(lookup_df[['x_theor','y_theor']].values)
 	obs_cr = np.array(lookup_df[['x_obs','y_obs']].values)#observed_xy[~np.isnan(lookup_t)]
@@ -371,12 +367,12 @@ def preprocess_dataset(lat_params,motif,extra_pars,dataset,calib,recall_zero=Fal
 
 
 def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_zero=False,show_initial_spots=False,vec_scale=0.05,
-			do_fit=True,relative_to=None,kernel=4,extra_shift_ab=None,sub_area=None,max_dist=0):
+			do_fit=True,relative_to=None,kernel=4,extra_shift_ab=None,sub_area=None,max_dist=0,export_sublattice_xy=False):
 	if not do_fit:
 		recall_zero=False
 	
 		
-	s = load_frame(folder,fname,calib).T#!TODO is .T needed?
+	s = load_frame(folder,fname,calib)#.T#!TODO is .T needed?
 	
 	dataset = np.load(folder+fname.split('.')[0]+'.npy').T
 
@@ -405,12 +401,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 		ax.scatter(observed_xy[:,0],observed_xy[:,1], marker='o',s=50, edgecolors="blue", facecolors="none", linewidths=2)
 		sc0 = ax.scatter(zeros[:,0],zeros[:,1], marker='o',s=50, edgecolors="k", facecolors="none", linewidths=3)
 		
-		
-		
-		
 		sc = ax.scatter(th_relevant[:,0],th_relevant[:,1], marker='o',s=50, color='r')
 		
-		ax.imshow(_im.T,extent=[0, W*calib, 0, H*calib],origin='upper')#,origin='lower')
+		ax.imshow(_im#.T
+				,extent=[0, W*calib, 0, H*calib],origin='lower')#,origin='upper')#,origin='lower')
 		
 		ax_shx = fig.add_axes([0.05, 0.12, 0.4, 0.03])
 		ax_shy = fig.add_axes([0.05, 0.07, 0.4, 0.03])
@@ -470,8 +464,9 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 
 
 	ij_cr, th_relevant, observed_xy, obs_cr, lookup_df = preprocess_dataset(lat_params,motif,extra_pars,
-											dataset,calib,recall_zero=recall_zero,
-									extra_shift_ab=extra_shift_ab,max_dist=max_dist,sub_area=sub_area)
+								dataset,calib,recall_zero=recall_zero,
+								extra_shift_ab=extra_shift_ab,
+								max_dist=max_dist,sub_area=sub_area)
 
 	lookup_t = lookup_df['lookup_t'].values
 
@@ -481,10 +476,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 	metadata['relative'] = relative_to
 	metadata['atoms_used'] = len(obs_cr)
 
-
-
 	#metadata['std'] = std
-
 
 	#param_vec,fit_param_vec = vectorize_params(lat_params,motif)
 	layout = build_layout(lat_params, motif, extra_pars)
@@ -495,10 +487,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 	
 	
 	print("layout.motif:", layout['motif'])
-	ix, iy = layout['motif']['A_1c']
-	print("A_1c indices:", ix, iy)
-	print("eq_mask at A_1c:", eq_mask[ix], eq_mask[iy])
-	print("in indep_idx:", ix in indep_idx, iy in indep_idx)
+	#ix, iy = layout['motif']['A_1c']
+	#print("A_1c indices:", ix, iy)
+	#print("eq_mask at A_1c:", eq_mask[ix], eq_mask[iy])
+	#print("in indep_idx:", ix in indep_idx, iy in indep_idx)
 	
 	if do_fit:	
 		res = scipy.optimize.minimize(get_diff, x0, args=(indep_idx, eq_mask, eq_funcs,
@@ -527,6 +519,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 	#if show_initial_spots:
 	#	plt.scatter(ij_inuse_cleared[:,0],ij_inuse_cleared[:,1])
 	#	plt.show()
+	
 	#atomap sublattices
 	#obs_lat = am.Sublattice(observed_xy/calib, image=s.T, color='b')
 	obs_lat = am.Sublattice(obs_cr/calib, image=s, color='b')
@@ -602,7 +595,9 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 		if relative_to is None:	
 			#plot_lattice(s,[obs_lat,theor_lat],fname,folder,sf,'initial_guess_full_'+sf)
 			plot_lattice(s,[obs_lat,refined_rel_lat],fname,folder,sf,'fit_'+sf)
-	
+			
+		if export_sublattice_xy:
+			np.save(folder+fname+'positions',np.array(theor_res_rel)/calib)
 		
 		file_s = folder + sf + '/' +fname +'_'+sf
 		plot_stats_rep(vdist,file_s+'_diff',ang=False,ang_weights=None)
@@ -615,8 +610,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 			plot_quiver(file_s + '_ellipticity',th_relevant2,f_el,f_rot,1,units_v='rel.u.',ell=True)
 		
 		
-		plot_quiver(file_s + '_vmap_abs',th_relevant2,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
-		plot_quiver(file_s + '_vmap_rotated',th_relevant2,vdiff_xy_corr,ang_corr,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_abs',th_relevant2,vdiff_xy,ang,
+				vec_scale,hd_w=2,units_v='$1 \AA$',ell=False,calib=calib)
+		plot_quiver(file_s + '_vmap_rotated',th_relevant2,vdiff_xy_corr,ang_corr,
+				vec_scale,hd_w=2,units_v='$1 \AA$',ell=False,calib=calib)
 		
 		#_corr meant to be aligned with OX already, compensating phi
 		phi = phi*np.pi/180
@@ -629,8 +626,10 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 		proj_a90 = np.dot(vdiff_xy,base_y)
 		proj_a90 = base_y*proj_a90[:,None]
 				
-		plot_quiver(file_s + '_vmap_proj_a',th_relevant2,proj_a,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
-		plot_quiver(file_s + '_vmap_proj_a90',th_relevant2,proj_a90,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False)
+		plot_quiver(file_s + '_vmap_proj_a',th_relevant2,proj_a,ang,
+				vec_scale,hd_w=2,units_v='$1 \AA$',ell=False,calib=calib)
+		plot_quiver(file_s + '_vmap_proj_a90',th_relevant2,proj_a90,ang,
+				vec_scale,hd_w=2,units_v='$1 \AA$',ell=False,calib=calib)
 		
 		if 'I0' in diff_df.columns and relative_to is None:
 			at_labels = [i+'\n'+j for i,j in zip(labels_raw,types_raw)]
@@ -638,6 +637,7 @@ def refinement_run(folder,sf,fname,calib,lat_params,motif,extra_pars={},recall_z
 
 		plot_output_page(fname,folder + sf + '/')
 		plot_output_page_diff(fname,folder + sf + '/')
+		
 	
 	return metadata, param_vec
 	

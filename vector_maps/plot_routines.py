@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import atomap.api as am
 import numpy as np
+import matplotlib.patches as patches
 
 import scipy.stats as st
 
@@ -67,7 +68,7 @@ def plot_violin(fname_save,labels,df):
 	plt.close()
 	
 	
-def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False):
+def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA$',ell=False,calib=None):
 	ref_angle = 0#np.pi/4
 	vx = [i for i,j in fin_lat]
 	vy = [j for i,j in fin_lat]
@@ -112,12 +113,14 @@ def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA
 		cb.set_ticks(np.array([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi]))
 		cb.set_ticklabels(
 			[r"$-\pi$", r"$-\dfrac{\pi}{2}$", "$0$", r"$\dfrac{\pi}{2}$", r"$\pi$"]
-	)
+		)
+		
+			
 	else:
 		cb.set_ticks(np.array([0,np.pi / 4, np.pi / 2, 3*np.pi / 4, np.pi]))
 		cb.set_ticklabels(
 			[r"$0$", r"$\dfrac{\pi}{4}$", r"$\dfrac{\pi}{2}$", r"$\dfrac{3\pi}{4}$",r"$\pi$"]
-	)
+		)
 	cb.ax.tick_params(labelsize=14)
 	#plt.tight_layout()
 	plt.savefig(fname_save,dpi=600)
@@ -126,9 +129,6 @@ def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA
 	fig1, ax1 = plt.subplots()
 	ax1.set_box_aspect(1)
 	ax1.set_title('')
-	#ax1.scatter(x, y, color='blue', s=5)
-	#color = matplotlib.colors.Normalize(vmin=0, vmax=1)
-	#M = np.hypot(u, v)
 	ax1.yaxis.set_inverted(True)
 	ax1.scatter(np.array(vu)*1000,np.array(vv)*1000, s=80, facecolors='none', edgecolors='r')#,color=ang,cmap='hsv'
 	ax1.spines['left'].set_position('zero')
@@ -139,6 +139,14 @@ def plot_quiver(fname_save,fin_lat,vdiff_xy,ang,vec_scale,hd_w=2,units_v='$1 \AA
 	ax1.spines['left'].set_visible(False)
 	ax1.xaxis.set_ticks_position('bottom')
 	ax1.yaxis.set_ticks_position('left')
+	
+	''' #to plot reference sircle
+	if not ell and calib is not None:
+		ref_center = (0, 0)
+		ref_radius = calib*1000 #nm to pm
+		circle = patches.Circle(ref_center, ref_radius, linestyle='--', edgecolor='black', facecolor='none')
+		ax1.add_patch(circle)
+	'''	
 
 	ax1.set_xlabel('pm', fontsize=16, labelpad=10)
 	ax1.set_ylabel('pm', fontsize=16, labelpad=10, rotation=0)#, labelpad=10

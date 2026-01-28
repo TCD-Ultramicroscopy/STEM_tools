@@ -11,6 +11,7 @@ import random
 
 import matplotlib.pyplot as plt
 import dask.array as da
+import dask
 import abtem
 
 def get_params(cif_path):
@@ -239,7 +240,7 @@ def get_euler_uvw(param_list,uvw):
 
 
 def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw,is_uvw=True,
-			inplane_angle=None,extra_shift_z=0,vac_xy=0,vac_z=0):
+			inplane_angle=None,extra_shift_z=0,vac_xy=0,vac_z=0,global_tilt=(0,0),tilt_degrees=True):
 	'''
 	High-level function; for a given crystal structure, generates the rectangular set of atoms - 'lamella'
 		in such a way that the requested uvw is directed upwards (!TODO or downwards... to be confirmed)
@@ -272,16 +273,16 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 	rot_matrix = rot.as_matrix()
 	
 	#Create supercell
-	#sup = get_supercell(cif_path,sblock_size)
-	da_atoms = da.from_array(get_supercell(cif_path,sblock_size).get_positions(), chunks=(1000000, 3))
-	da_elements = da.from_array(get_supercell(cif_path,sblock_size).get_chemical_symbols(),chunks=1000000)
-	#del sup
+	sup = get_supercell(cif_path,sblock_size)
+	da_atoms = da.from_array(sup.get_positions(), chunks=(100000, 3))
+	da_elements = da.from_array(sup.get_chemical_symbols(),chunks=100000)
+	del sup
 	
 	print('There are ',len(da_atoms),' atoms in the supercell')
 	
 	#Here we are rotating x,y,z set
 	#new_coords = rot_matrix.apply(all_atoms)# inverse=True
-	new_coords =  da_atoms @ rot_matrix.T
+	new_coords =  (da_atoms @ rot_matrix.T).rechunk({1:3})
 	
 	print('Rotated')
 	
@@ -295,15 +296,15 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 	#and harmonizing variables, just in case
 	new_coords = sup.get_positions()
 	'''
-	
+	ftol = 0.00001
 	#lets select a relatively small test subset of atoms to:
 	#	- find the atom of interest nearest to (0,0,0) - say, atom0
 	#	- find the angle between OX and vector from the atom0 to the nearest atom of the same type
 	box = max(param_list[:3])
 	box = max(box,10)
 	box = da.ones(3)*box
-	mask = da.all(new_coords >= -box, axis=1) * da.all(
-						new_coords < box, axis=1 )
+	mask = da.all(new_coords > -box - ftol, axis=1) & da.all(
+						new_coords < box + ftol, axis=1 )
 	print('Mask created')
 	#mask = np.all( abs(new_coords) < np.array(param_list[:3]), axis=1 )
 	test_c = new_coords[mask]
@@ -313,7 +314,7 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 	#del new_coords
 	
 	#Here I wish to find an atom of interest nearby 0 and bring it to 0... on the subset of +-abc
-	if atom_to_zero is not None:
+	if atom_to_zero is not None:#TODO still doesnt work with non-existing atom
 		#chem = test_c.get_chemical_symbols()
 		#if atom_to_zero in chem:
 		mask_chem = da.isin(chem, atom_to_zero)
@@ -334,7 +335,7 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 			ref_atoms -= new_zero
 			
 			#Lets find atoms of the same type, located nearby XY plane
-			ref_atoms_xy = [ (x,y,z) for (x,y,z) in ref_atoms if (abs(z) < 1) and (abs(x) > 0.1) and (abs(y) > 0.1) ] #TODO dx as var
+			ref_atoms_xy = [ (x,y,z) for (x,y,z) in ref_atoms if (abs(z) < 5) and (abs(x) > 0.1) and (abs(y) > 0.1) ] #TODO dx as var; dz as f(a,b,c)
 			proj_XY = np.array([ (x,y,0) for (x,y,z) in ref_atoms_xy ])
 			
 			#Here we are measuring the angle towards the nearest atom of the same type
@@ -417,6 +418,8 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 	rot_matrix = R.from_euler('z',-rot_angle,degrees=True).as_matrix()
 	#new_coords = rot_matrix.apply(new_coords)
 	new_coords = new_coords @ rot_matrix.T
+	#new_coords = new_coords.compute()
+	
 	print(np.round(rot_matrix,5))
 	#applying changes to the ase object
 	#sup.set_positions(new_coords)
@@ -427,23 +430,59 @@ def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw
 	###Here we are cropping the lamella, from 0 to lims
 	#-a/2,a/2 to be considered
 	margin = np.ones(3)*tol
-	mask_fin = da.all(new_coords >= -margin, axis=1) * da.all(
-			new_coords < (np.array(lamella_sizes) + margin), axis=1 )
-			
+	
+	
+	
+	#mask_fin = da.all(new_coords > -margin, axis=1) & da.all(
+	#		new_coords < (np.array(lamella_sizes) + margin), axis=1 )
+	
+	#mask_fin = mask_fin.compute()
+	upper = np.asarray(lamella_sizes, dtype=float) + margin
+	mask_fin = (da.all(new_coords > -margin, axis=1) & da.all(new_coords < upper, axis=1)).astype(bool)
+	mask_fin = mask_fin.rechunk({0: "auto"})
+	da_elements = da_elements.rechunk({0: mask_fin.chunks[0]})
+	
 	cropped = new_coords[mask_fin] + (vac_xy,vac_xy,vac_z)
-	cropped = cropped.compute()
-	cropped_chem = da_elements[mask_fin].compute()
-
+	
+	if not tilt_degrees:
+		tilt = np.array(global_tilt)/1000
+		print('tilt in mrad',tilt)
+	else:
+		tilt = global_tilt
+	
+	rot_matrix_x = R.from_euler('x',tilt[0],degrees=tilt_degrees).as_matrix()
+	cropped = cropped @ rot_matrix_x.T
+	rot_matrix_y = R.from_euler('y',tilt[1],degrees=tilt_degrees).as_matrix()
+	cropped = cropped @ rot_matrix_y.T	
+	
+	#cropped = cropped.compute()
+	
+	print(rot_matrix_x.T,rot_matrix_x.T)
+	#z_shift_t = max(np.sin(global_tilt[0]/180*np.pi)*lamella_sizes[1],
+	#		np.sin(global_tilt[1]/180*np.pi)*lamella_sizes[0])
+	#		
+	#cropped = cropped + (0,0,z_shift_t)
+	
+	#cropped = cropped.compute()
+	cropped_chem = da_elements[mask_fin]
+	cropped,cropped_chem = dask.compute(cropped,cropped_chem)
+	
 	#cropped = sup[mask]
 	print('Atoms in the lamella',len(cropped))
 
 	#cropped.translate((vac_xy,vac_xy,vac_z))
 	
-	cell_size = (lamella_sizes[0]+2*vac_xy,lamella_sizes[1]+2*vac_xy,lamella_sizes[2]+2*vac_z,90,90,90)
+	#TODO ensure tilt doesnt shift it out of range
+	cell_size = (lamella_sizes[0]+2*vac_xy,lamella_sizes[1]+2*vac_xy,
+			lamella_sizes[2]+2*vac_z,#+2*z_shift_t,
+			90,90,90)
 	
 	fin_cell = ase.Atoms(cropped_chem, cropped, cell=np.asarray(cell_size, float), pbc=False)
 	#Just in case, to avoid undesired ase magic
 	#cropped.set_cell()
+	
+	#fin_cell.rotate(global_tilt[0], v='x', rotate_cell=True)
+	#fin_cell.rotate(global_tilt[1], v='y', rotate_cell=True)
 	
 	return fin_cell
 	
@@ -470,7 +509,7 @@ def add_vacancies(surf,el,prob):
 	return cropped
 
 #Previews plot
-def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
+def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name,global_tilt):
 	'''
 	This function plots a few previews of probe and pseudopotential
 	Inputs
@@ -498,7 +537,7 @@ def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
 	else:
 		str_hkl = 'hkl ['+line_hkl+']'
 
-	#'''#Could be time-consuming; might be optional
+	'''#Could be time-consuming; might be optional
 	fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(4, 4))
 	abtem.show_atoms(surf, ax=ax1, title="XY projection" )#, scans=scan)
 	scan.add_to_plot(ax1)
@@ -533,12 +572,12 @@ def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
 	probe.show(figsize=(4, 4), title="Real Space Probe", ax=ax2)
 	fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
 	fig.tight_layout()
-	fig.savefig(folder_sim+sg+'_'+line_hkl+'_potential.png',dpi=600)
+	fig.savefig(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_potential.png',dpi=600)
 	plt.close()
 		
 	proj_cpu.to_tiff(folder_sim+sg+'_'+line_hkl+'_potential.tif')
 	proj_cropped = proj_cpu.crop( [scan_s,scan_s], offset=(borders, borders))	
-	proj_cropped.to_tiff(folder_sim+sg+'_'+line_hkl+'_scanned_potential.tif')
+	proj_cropped.to_tiff(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_scanned_potential.tif')
 		
 	fph_potential = data['fph_potential']	
 	fph_proj_cpu = fph_potential.project().to_cpu()
@@ -553,7 +592,7 @@ def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
 	fph_probe.show(figsize=(4, 4), title="Real Space Probe", ax=ax2)
 	fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
 	fig.tight_layout()
-	fig.savefig(folder_sim+sg+'_'+line_hkl+'_fph_potential.png',dpi=600)
+	fig.savefig(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_fph_potential.png',dpi=600)
 	plt.close()
 	
 	#This one is the most important - it draws 3 projections of a final block
@@ -565,15 +604,15 @@ def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
 	abtem.show_atoms(surf, ax=ax3, title="Cross-section", plane='yz')
 
 	fig.suptitle(sample_name+', '+sg+', '+str_hkl,fontsize=18)
-	fig.savefig(folder_sim+sg+'_'+line_hkl+'_combined.png',dpi=600)
+	fig.savefig(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_'+'_combined.png',dpi=600)
 	plt.close()
 		
 	#'''
 	fph_proj_mean = fph_proj_cpu.mean(axis=0)
-	fph_proj_mean.to_tiff(folder_sim+sg+'_'+line_hkl+'_fph_potential.tif')
+	fph_proj_mean.to_tiff(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_fph_potential.tif')
 	
 	proj_cropped = fph_proj_mean.crop( [scan_s,scan_s], offset=(borders, borders))		
-	proj_cropped.to_tiff(folder_sim+sg+'_'+line_hkl+'_scanned_fph_potential.tif')
+	proj_cropped.to_tiff(folder_sim+sg+'_'+line_hkl+'_'+str(global_tilt)+'_scanned_fph_potential.tif')
 	
 	
 	#cp.cuda.Stream.null.synchronize()
@@ -582,157 +621,6 @@ def plot_dataset(data,is_uvw,scan_s,borders,folder_sim,sample_name):
 	#'''
 
 	
-	
-	
-'''Historical
-def make_lamella(cif_path,hkl,sblock_size,lamella_sizes,atom_to_zero,tol,max_uvw,is_uvw=True,inplane_angle=None,extra_shift_z=0,vac_xy=0,vac_z=0):
-	
-	High-level function; for a given crystal structure, generates the rectangular set of atoms - 'lamella'
-		in such a way that the requested uvw is directed upwards (!TODO or downwards... to be confirmed)
-	Input:
-		cif_path - str, existing path to the valid cif file
-		hkl - tuple of three ints; desired orientation uvw (or normal to hkl)
-		sblock_size - int or float, size of the superblock cube which later will be rotated and cropped
-		lamella_sizes - tuple of 3 ints, XxYxZ sizes of the proposed lamella in Angstroms
-		atom_to_zero - str, label of atom to be set to the point of origin after the rotation completed
-			!NB not to the corner of the virtual scan; there is a gap
-		tol - float, tolerance for atoms on surfaces and near zero
-		max_uvw - int, max value of the multiplier for hkl to uvw conversion
-		
-		is_uvw - boolean, defines if we provided hkl or uvw vector
-		
-		inplane_angle - float, extra rotation in XY plane, degrees
-		extra_shift_z - float, shifts the superblock along Z before cropping
-	output - ase object
-	
-	
-	#Obtain rotation matrix for hkl/uvw and the structure given
-	param_list = get_params(cif_path)
-	if is_uvw:
-		uvw = hkl
-	else:
-		uvw = hkl_to_uvw(param_list,hkl,max_uvw,around=False)
-	rot_matrix = get_euler_uvw(param_list,uvw)
-	
-	#Create supercell
-	sup = get_supercell(cif_path,sblock_size)
-	all_atoms = sup.get_positions()
-	print('There are ',len(all_atoms),' atoms in the supercell')
-	
-	#Here we are rotating x,y,z set
-	new_coords = rot_matrix.apply(all_atoms)# inverse=True
-	#amending coordinates in the ase object
-	sup.set_positions(new_coords)
-	#and harmonizing variables, just in case
-	new_coords = sup.get_positions()
-
-	#lets select a relatively small test subset of atoms to:
-	#	- find the atom of interest nearest to (0,0,0) - say, atom0
-	#	- find the angle between OX and vector from the atom0 to the nearest atom of the same type
-	box = max(param_list[:3])
-	box = max(box,10)
-	box = np.ones(3)*box
-	mask = np.all(new_coords >= -box, axis=1) * np.all(
-						new_coords < box, axis=1 )
-
-	#mask = np.all( abs(new_coords) < np.array(param_list[:3]), axis=1 )
-	test_c = sup[mask]
-	
-	#Here I wish to find an atom of interest nearby 0 and bring it to 0... on the subset of +-abc
-	if atom_to_zero is not None:
-		leads = [ i for i,j in zip(test_c.get_positions(), test_c.get_chemical_symbols()) if j == atom_to_zero ]
-		#print('Pb',leads)
-		dist = ase.geometry.get_distances((0,0,0), p2=leads, cell=test_c.cell, pbc=True )[1][0]
-		new_zero = [ i for i,j in zip(leads,dist) if (j > min(dist) - tol) and ( j < min(dist) + tol ) ][0]
-		print('Zero moved to',new_zero)
-		#!NB ase object is shifted here, not (x,y,z) set - it shall be updated
-		sup.translate(-new_zero)
-		#Extra shift by z applied here
-		sup.translate((0,0,-extra_shift_z))
-
-	#Update gathered coordinates
-	new_coords = sup.get_positions()
-	
-	
-	if inplane_angle is None and atom_to_zero is not None:
-		###Here we need to rotate the system in the way that the nearest atom of interest will settle on OX
-		#if dist are within marg, then 1st quarter
-		loc_margin = [0.1,0.1,0.1]
-		#take a flat rectagonal area of margin thickness with a margin void around zero 
-		mask = np.all(abs(new_coords) >= loc_margin, axis=1) * np.all(
-							abs(new_coords) < box, axis=1 )
-	
-		test_c = sup[mask]
-		leads = [ i for i,j in zip(test_c.get_positions(), test_c.get_chemical_symbols()) if j == atom_to_zero ]
-
-		proj_XY = [ (x,y,0) for (x,y,z) in leads ]
-		if len(proj_XY) >1:
-			dot = [ np.dot(i,[1,0,0]) for i in proj_XY ]
-			norm = [ np.linalg.norm(i) for i in proj_XY ]
-			angle = [ np.arccos(i/j)/np.pi*180 for i,j in zip(dot,norm) ]
-
-			selected = np.atleast_2d(proj_XY[np.all(abs(np.array(angle))==min(abs(np.array(angle))))])
-			#fin_selected = selected
-			if len(selected)>1:
-				dist = [np.dot(i,i) for i in selected]
-				selected = np.atleast_2d(selected[np.all(dist==min(dist))])
-				#print(selected)
-				if len(selected)>1:
-						for i in selected:
-							found = False
-							if i[0]>0 and i[1]>0:
-								fin_selected = i
-								found = True
-								break
-							elif i[1]>0:
-								fin_selected = i
-								found = True
-						if not found:
-							fin_selected = selected[0]
-				else:
-							fin_selected = selected[0]
-			else:
-						fin_selected = selected[0]
-		else:
-			fin_selected = proj_XY[0]
-		print(fin_selected)
-	
-		rot_angle = np.arccos(np.dot(fin_selected,[1,0,0])/np.linalg.norm(fin_selected))/np.pi*180
-		print('Proposed in-plane rotation',rot_angle)
-	else:
-		#angle can not be autodefined without a given atom of interest
-		if inplane_angle is None:
-			inplane_angle = 0
-		rot_angle = inplane_angle
-		print('Requested in-plane rotation',rot_angle)
-		
-	#Here we are rotating the full set of coordinates (x,y,z)
-	rot_matrix = R.from_euler('z',rot_angle,degrees=True)
-	new_coords = rot_matrix.apply(new_coords)
-	print(np.round(rot_matrix.as_matrix(),5))
-	#applying changes to the ase object
-	sup.set_positions(new_coords)
-	#and renewing xyz, just in case
-	new_coords = sup.get_positions()
-	
-	###Here we are cropping the lamella, from 0 to lims
-	#-a/2,a/2 to be considered
-	margin = np.ones(3)*tol
-	mask = np.all(new_coords >= -margin, axis=1) * np.all(
-			new_coords < (np.array(lamella_sizes) + margin), axis=1 )
-
-	cropped = sup[mask]
-	print('Atoms in the lamella',len(cropped.get_positions()))
-
-	cropped.translate((vac_xy,vac_xy,vac_z))
-	#Just in case, to avoid undesired ase magic
-	cropped.set_cell((lamella_sizes[0]+2*vac_xy,lamella_sizes[1]+2*vac_xy,lamella_sizes[2]+2*vac_z,90,90,90))
-	
-	
-	return cropped
-'''
-
-
 	
 '''
 def gen_hkl(uvw,max_uvw=20):

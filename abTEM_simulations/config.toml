@@ -4,7 +4,7 @@ folder_sim = '/home/vasily/test_abTEM/'
 #folder_sim = 'C://Users//lebedevv//Desktop//sym//'
 
 #Specific subfolder - please, make sure that path exists!
-extr='test_v3/'
+extr='test_v5/'
 
 #Path to cif files
 folder = '/home/vasily/test_abTEM/'
@@ -22,7 +22,7 @@ dask_chunk_size = "512 MB"
 
 [simulations]
 #Number of frozen phonons
-frozen_phonons = 2
+frozen_phonons = 5
 #frozen_phonons = 15
 #frozen_phonons = 'None'
 
@@ -32,7 +32,7 @@ fph_sigma = 0.25#0.25#0.1 #A;
 #override XY sampling (scan); default - Nyquist*0.9
 #override_sampling = .5
 override_sampling = false
-do_full_run = true
+do_full_run = false
 
 [lamella_settings]
 #Max int to search for uvw
@@ -42,22 +42,22 @@ max_uvw = 20
 #Size of a superblock
 
 #sblock_size = 1100 #A
-sblock_size = 100 #A
+sblock_size = 500 #A
 
 #!!!! there is no guaranty that the frame will be 100% filled after the rotation and crop !!!
 #better to double-check, and to keep sblock size sufficiently large
 
 #Scan size
-scan_s = 10 #A
-#scan_s = 50 #A
+#scan_s = 10 #A
+scan_s = 50 #A
 
 #Extra gaps, framing the sacn in XY directions
 #borders = 5 #A
-borders = 5 #A
+borders = 10 #A
 
 #Thickness of the virtual lamella
-thickness = 10 #A
-#thickness = 300 #A
+#thickness = 10 #A
+thickness = 100 #A
 
 extra_shift_z = 0#-10 #A
 
@@ -73,8 +73,9 @@ atom_to_zero = 'Zr'
 ##############
 
 #Tilt - to tilt the lamella, not the beam
-global_tilt_a = 0 #around x, deg
-global_tilt_b = 0 #around y, deg
+global_tilt_a = [0,0.1,0.25,0.5,1,2,5,10,-0.1,-0.25,-0.5,-1,-2,-5,-10] #around x
+global_tilt_b = [0,0.1,0.25,0.5,1,2,5,10,-0.1,-0.25,-0.5,-1,-2,-5,-10] #around y
+tilt_degrees = false #true - degrees, false - mrad
 
 #Only if we need vacances; experimental
 add_vacancies_toggle = false

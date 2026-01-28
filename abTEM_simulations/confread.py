@@ -32,12 +32,12 @@ class GPU_related(BaseModel):
 
 class Simulations(BaseModel):
 	override_sampling: float | bool = Field()
-	frozen_phonons: int | str = Field() #str meant to be only 'None'
-	fph_sigma: float | bool = Field() #bool meant to be converted to None
+	frozen_phonons: int | str | list[int | str] = Field() #str meant to be only 'None'
+	fph_sigma: float | bool | str | list[float | bool | str] = Field() #bool meant to be converted to None
 	do_full_run: bool = Field()
 
 class Microscope(BaseModel):
-	HT_value: int = Field()
+	HT_value: int | list[int ] = Field()
 	do_diffraction: bool = Field()
 	haadfinner: float = Field()
 	haadfouter: float = Field()
@@ -51,15 +51,16 @@ class Lamella_Settings(BaseModel):
 	sblock_size: float = Field()
 	scan_s: float = Field()
 	borders: float = Field()
-	thickness: float = Field()
+	thickness: float | list[float] = Field()
 	extra_shift_z: float = Field()
 	tol: float = Field()
 	atom_to_zero: str = Field()
-	global_tilt_a: float = Field()
-	global_tilt_b: float = Field()
+	global_tilt_a: float | list[float] = Field()
+	global_tilt_b: float | list[float] = Field()
+	tilt_degrees: bool = Field()
 	add_vacancies_toggle: bool = Field()
 	element_to_remove: str = Field()
-	probability_of_vac: float = Field()
+	probability_of_vac: float | list[float] = Field()
 
 class AppConfig(BaseModel):
 	paths: Paths

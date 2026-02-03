@@ -174,7 +174,7 @@ def resolve_context(cfg, global_tilt: tuple[float, float] | None = None):
 	#Here we are deciding if cpu or gpu computing happens
 	use_gpu = cfg.gpu_related.use_gpu
 	if use_gpu:
-		abtem.config.set({"device": "gpu", "fft": "fftw",'dask.lazy': True})
+		abtem.config.set({"device": "gpu", "fft": "cufft",'dask.lazy': True})
 		abtem.config.set({"cupy.fft-cache-size" : cfg.gpu_related.cupy_fft_cache_size})
 		abtem.config.set({"dask.chunk-size-gpu" : cfg.gpu_related.dask_chunk_size_gpu})
 		import cupy as cp
@@ -239,7 +239,7 @@ def add_potential(surf):
 	projection='infinite',
 	parametrization='kirkland',
 	periodic=False,
-	).build()#.compute()
+	).build().compute()
 
 	return potential
 
@@ -290,24 +290,18 @@ def add_scan(ctx, probe,pot):
 	return scan   
 
 def plot_diffraction(ctx, pot,fname,ftitle):
-	#try:
-	#	pot_cpu = pot.copy_to_device('cpu')
-	#except:
-	#pot_cpu = pot.build()
-	#pot_cpu = pot.copy_to_device('cpu')
-	#pot_cpu = pot.to_cpu()
-	#print('No CPU conversion')
-	#print(type(pot_cpu))
-	
 	fname = str(fname)
 	
-	initial_waves = abtem.PlaneWave(energy=ctx.HT_value,device='cpu')
-	exit_waves = initial_waves.multislice(pot).compute()
+	initial_waves = abtem.PlaneWave(energy=ctx.HT_value)
+	try:
+		exit_waves = initial_waves.multislice(pot.compute()).compute()
+	except:
+		exit_waves = initial_waves.multislice(pot).compute()
 	#exit_waves_raw = initial_waves.multislice(pot).to_cpu()
 
 	#exit_waves = exit_waves_raw.compute()
 	print('Exit waves')
-	diffraction_patterns = exit_waves.diffraction_patterns(max_angle="valid", block_direct=True).compute()
+	diffraction_patterns = exit_waves.diffraction_patterns(max_angle="valid", block_direct=True).compute().to_cpu()
 	diffraction_patterns.show(
 		explode=False,power=0.2,units="mrad",
 		figsize=(10, 6),cbar=True,common_color_scale=True,)
@@ -414,7 +408,7 @@ def simulation_run(s,cfg,
 		save_config(run_cfg, cfg_out_path )
 
 		sim.plot_dataset(dataset[i],is_uvw,cfg.lamella_settings.scan_s,
-			cfg.lamella_settings.borders,str(out_dir),cfg.paths.sample_name,ctx.global_tilt)
+			cfg.lamella_settings.borders,str(out_dir)+'/',cfg.paths.sample_name,ctx.global_tilt)
 		
 		#surf_fname = ctx.folder_sim+dataset[i]['symm']+'_'+line_hkl+'_'+str(ctx.global_tilt)+'surf.xyz'
 		surf_fname = out_dir / f"{sg}_{line_hkl}_{ctx.global_tilt}_surf.xyz"
@@ -469,7 +463,7 @@ def simulation_run(s,cfg,
 			w = 0
 			while w < len(img):
 				iimg = img[w].copy()
-				det_s = ['haadf','abf'][w]
+				det_s = ['haadf','abf','bf'][w]
 				#iimg.to_tiff(ctx.folder_sim+'fph_'+dataset[i]['symm']+'_'+str(ctx.global_tilt)+'_'+line_hkl+'_'+det_s+'.tif')
 				#iimg.to_zarr(ctx.folder_sim+'fph_'+dataset[i]['symm']+'_'+str(ctx.global_tilt)+'_'+line_hkl+'_'+ det_s+'.zarr',overwrite=True)	
 				iimg.to_tiff(str(out_dir / f"fph_{sg}_{ctx.global_tilt}_{line_hkl}_{det_s}.tif"))

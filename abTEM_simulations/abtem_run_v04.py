@@ -46,6 +46,9 @@ class RunContext:
 	global_tilt: tuple[float, float]
 	tilt_degrees: bool
 
+	convergence_angle: float
+	cbed_max_angle: float | str
+
 	# resolved detectors (abtem objects)
 	haadf_detector: object
 	abf_detector: object
@@ -216,6 +219,8 @@ def resolve_context(cfg, global_tilt: tuple[float, float] | None = None):
 		lamella_sizes=lamella_sizes,
 		global_tilt=global_tilt,
 		tilt_degrees=cfg.lamella_settings.tilt_degrees,
+		convergence_angle=cfg.microscope.convergence_angle,
+		cbed_max_angle=cfg.microscope.cbed_max_angle,
 		haadf_detector=haadf_detector,
 		abf_detector=abf_detector,
 		bf_detector=bf_detector,
@@ -247,22 +252,22 @@ def add_frozen_phonons_potential(ctx,surf):
 	frozen = abtem.FrozenPhonons(surf, num_configs=ctx.frozen_phonons, sigmas=ctx.fph_sigma, seed=100)
 	# Make the potential
 	potential = abtem.Potential(
-	frozen,
-	sampling=0.05,   # real space sampling
-	projection='infinite',
-	parametrization='kirkland',
-	periodic=False,
+		frozen,
+		sampling=0.05,   # real space sampling
+		projection='infinite',
+		parametrization='kirkland',
+		periodic=False,
 	)#.build().compute() #once-done is faster, but requires a huge amount of memory
 	
 	return potential
 
-def add_probe(ctx, potential):
+def add_probe(ctx, potential,defocus="scherzer"):
 	# Make the probe
 	#tilt = (0,0) #this one is a beam tilt not the sample one
 	probe = abtem.Probe(
-	energy=ctx.HT_value, 
-	semiangle_cutoff=30, 
-	defocus="scherzer"
+		energy=ctx.HT_value, 
+		semiangle_cutoff=ctx.convergence_angle,#30, 
+		defocus=defocus
 	)
 	#,
 	#tilt=tilt
@@ -292,16 +297,18 @@ def add_scan(ctx, probe,pot):
 def plot_diffraction(ctx, pot,fname,ftitle):
 	fname = str(fname)
 	
-	initial_waves = abtem.PlaneWave(energy=ctx.HT_value)
+	initial_waves = abtem.PlaneWave(energy=ctx.HT_value,device='cpu')
 	try:
-		exit_waves = initial_waves.multislice(pot.compute()).compute()
+		exit_waves = initial_waves.multislice(pot.to_cpu()).compute()
 	except:
 		exit_waves = initial_waves.multislice(pot).compute()
 	#exit_waves_raw = initial_waves.multislice(pot).to_cpu()
 
 	#exit_waves = exit_waves_raw.compute()
 	print('Exit waves')
-	diffraction_patterns = exit_waves.diffraction_patterns(max_angle="valid", block_direct=True).compute().to_cpu()
+	diffraction_patterns = exit_waves.diffraction_patterns(max_angle="valid", block_direct=True).compute()
+	if diffraction_patterns.ensemble_dims > 0:
+		diffraction_patterns = diffraction_patterns.reduce_ensemble()
 	diffraction_patterns.show(
 		explode=False,power=0.2,units="mrad",
 		figsize=(10, 6),cbar=True,common_color_scale=True,)
@@ -312,10 +319,50 @@ def plot_diffraction(ctx, pot,fname,ftitle):
 	plt.savefig(fname,dpi=600)
 	plt.close()
 	
-	if len(diffraction_patterns.shape) > 2:
-		diffraction_patterns.mean(axis=0).to_tiff(fname[:-4]+'.tif')
+	diffraction_patterns.to_tiff(fname[:-4]+'.tif')
+
+def plot_cbed(ctx, pot, fname, ftitle, position=None):
+	fname = str(fname)
+	probe = add_probe(ctx, pot)
+
+	if position is None:
+		position = np.array([[
+			0.5 * (ctx.scan_start[0] + ctx.scan_stop[0]),
+			0.5 * (ctx.scan_start[1] + ctx.scan_stop[1]),
+		]], dtype=float)
 	else:
-		diffraction_patterns.to_tiff(fname[:-4]+'.tif')
+		position = np.array([position], dtype=float)
+
+	try:
+		exit_waves = probe.multislice(pot.to_cpu(), scan=position).compute()
+	except Exception:
+		exit_waves = probe.multislice(pot, scan=position).compute()
+
+	print("CBED exit wave")
+	
+	cbed = exit_waves.diffraction_patterns(
+		max_angle=ctx.cbed_max_angle,
+		block_direct=False
+	)
+	
+	if cbed.ensemble_dims > 0:
+		cbed = cbed.reduce_ensemble()
+
+	cbed = cbed.compute().squeeze()
+	
+	cbed.show(
+		power=0.2,
+		units="mrad",
+		figsize=(8, 6),
+		cbar=True,
+		common_color_scale=True,
+	)
+	fig = plt.gcf()
+	fig.suptitle(ftitle, y=1.005)
+	plt.savefig(fname, dpi=600)
+	plt.close()
+	
+	cbed.to_tiff(fname[:-4]+'.tif')
 
 def prepare_job(ctx, hkl_set,is_uvw=True,inplane_angle=None):
 	'''
@@ -376,8 +423,7 @@ def prepare_job(ctx, hkl_set,is_uvw=True,inplane_angle=None):
 
 def simulation_run(s,cfg,
 	is_uvw=True,
-	inplane_angle=None,
-	do_full_run=False
+	inplane_angle=None
 	):
 	'''
 	Main starter function
@@ -422,9 +468,16 @@ def simulation_run(s,cfg,
 			print('Diffraction - fph')
 			#plot_diffraction(ctx,dataset[i]['fph_potential'],ctx.folder_sim+sg+'_'+line_hkl+'_'+str(ctx.global_tilt)+'_fph_diff.png',ttl+', '+str(ctx.frozen_phonons)+' fph')
 			
-			plot_diffraction(ctx,dataset[i]['potential'], out_dir / f"{sg}_{line_hkl}_single_diff.png", ttl)
-			plot_diffraction(ctx,dataset[i]['fph_potential'], out_dir / f"{sg}_{line_hkl}_fph_diff.png", ttl+', '+str(ctx.frozen_phonons)+' fph')
-						
+			plot_diffraction(ctx,dataset[i]['potential'], out_dir / f"{sg}_{line_hkl}_{ctx.global_tilt}_single_diff.png", ttl)
+			plot_diffraction(ctx,dataset[i]['fph_potential'], out_dir / f"{sg}_{line_hkl}_{ctx.global_tilt}_fph_diff.png", ttl+', '+str(ctx.frozen_phonons)+' fph')
+			plot_cbed(ctx, dataset[i]['potential'],
+				out_dir / f"{sg}_{line_hkl}_{ctx.global_tilt}_center_cbed.png",
+				ttl + ', center CBED' )
+			plot_cbed(ctx, dataset[i]['fph_potential'],
+				out_dir / f"{sg}_{line_hkl}_{ctx.global_tilt}_center_fph_cbed.png",
+				ttl + ', center CBED, ' + str(ctx.frozen_phonons) + ' fph'
+				)
+				
 		if ctx.do_full_run:
 			potential = dataset[i]['potential']
 			probe = add_probe(ctx,potential)
@@ -468,7 +521,7 @@ def simulation_run(s,cfg,
 				#iimg.to_zarr(ctx.folder_sim+'fph_'+dataset[i]['symm']+'_'+str(ctx.global_tilt)+'_'+line_hkl+'_'+ det_s+'.zarr',overwrite=True)	
 				iimg.to_tiff(str(out_dir / f"fph_{sg}_{ctx.global_tilt}_{line_hkl}_{det_s}.tif"))
 				iimg.to_zarr(str(out_dir / f"fph_{sg}_{ctx.global_tilt}_{line_hkl}_{det_s}.zarr"), overwrite=True)
-                 			
+				 			
 				for k in [0.025,0.1,0.25]:
 					blurred = iimg.gaussian_filter(k,boundary='constant')
 					#blurred.to_tiff(ctx.folder_sim+'fph_'+dataset[i]['symm']+'_'+str(ctx.global_tilt)+'_'+line_hkl +'_'+det_s+'_'+str(k).replace('.','-')+'.tif')
@@ -478,6 +531,6 @@ def simulation_run(s,cfg,
 
 cfg0 = confread.load_config("config.toml")
 for cfg_run in expand_cfg(cfg0):
-	simulation_run({'Pm3m': [[1,1,0]]}, cfg_run, do_full_run=False)
+	simulation_run({'Pm3m': [[1,1,0]]}, cfg_run)
 
 print('Finished')
